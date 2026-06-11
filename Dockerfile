@@ -51,25 +51,9 @@ USER appuser
 EXPOSE 8000
 
 # Liveness check that reuses the /health route, using only the stdlib (the slim
-# base has no curl).
+# base has no curl). The `CMD python -c "..."` below MUST stay on one physical
+# line — don't let your editor wrap it.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request, sys; sys.exit(0 if
-urllib.request.urlopen('http://127.0.0.1:8000/health').status == 200 else 1)"
-
-CMD ["uvicorn", "typewright.main:app", "--host", "0.0.0.0", "--port", "8000"]
-# Put the venv's executables (uvicorn, python) first on PATH.
-ENV PATH="/app/.venv/bin:$PATH"
-
-# Run as an unprivileged user, not root.
-RUN useradd --create-home --uid 10001 appuser
-USER appuser
-
-EXPOSE 8000
-
-# Liveness check that reuses the /health route, using only the stdlib (the slim
-# base has no curl).
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request, sys; sys.exit(0 if
-urllib.request.urlopen('http://127.0.0.1:8000/health').status == 200 else 1)"
+    CMD python -c "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status == 200 else 1)"
 
 CMD ["uvicorn", "typewright.main:app", "--host", "0.0.0.0", "--port", "8000"]
