@@ -47,6 +47,21 @@ class FunctionMetadata(BaseModel):
     source: str
 
 
+class Contract(BaseModel):
+    """The inferred semantic contract of a function (Phase 2).
+
+    Three lists of plain-language statements: what must be true of the inputs
+    (``preconditions``), what the function guarantees about its result
+    (``postconditions``), and properties that always hold (``invariants``).
+    Produced by the LLM from the function's source; consumed by Phase 3 to
+    generate Hypothesis strategies. Shape fixed by the API spec (§7.1, D14).
+    """
+
+    preconditions: list[str] = Field(default_factory=list)
+    postconditions: list[str] = Field(default_factory=list)
+    invariants: list[str] = Field(default_factory=list)
+
+
 class AnalyzedFunction(BaseModel):
     """The lean, API-facing view of a parsed function (Phase 1 response)."""
 

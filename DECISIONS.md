@@ -74,3 +74,59 @@ premature given D1.
 ### Meta — Python 3.12 (3.11 floor)
 **Decision:** Target 3.12; minimum supported 3.11.
 **Why:** Brief specifies 3.11+; 3.12 is a safe modern default. `ast.unparse` is 3.9+.
+
+## Phase 2 — LLM Contract Inference
+
+### D13 — Structured contract output via Instructor; API key passed explicitly
+**Decision:** Get the `Contract` back as a validated Pydantic object using **Instructor**
+(which re-asks the model, up to `llm_max_retries` times, when the output doesn't fit the
+schema) rather than hand-parsing free-form text. Read the provider key from
+`ANTHROPIC_API_KEY` (or `TYPEWRIGHT_ANTHROPIC_API_KEY`) into `Settings` and pass it
+**explicitly** to the client.
+**Why:** The contract has a fixed shape (D14); Instructor turns "model returns JSON-ish text"
+into "model returns a `Contract`, or we retry", so the pipeline never has to defend against
+malformed output. Passing the key explicitly (rather than relying on ambient global env) keeps
+configuration in one typed place (D9) and makes the call testable — a test can inject a fake
+key/client without mutating the process environment.
+
+### D14 — Contract shape: preconditions / postconditions / invariants
+**Decision:** Model the inferred contract as three lists of plain-language strings —
+`preconditions`, `postconditions`, `invariants` — matching the brief's API spec (§7.1).
+**Why:** It's the shape the spec promises callers and the shape Phase 3 consumes to generate
+Hypothesis strategies. Fixing it now means the LLM step, the API response, and the strategy
+generator all agree on one structure. Plain strings (not a richer AST) keep Phase 2 simple and
+the model's job well-defined; structure can be added later if a phase needs it.
+
+### D15 — Internal failures use `PipelineError`, which names the failing stage
+**Decision:** A failure in one of our own analysis steps raises `PipelineError(stage, detail)`
+— an exception deliberately **outside** the `TypeWrightError` family — so it maps to 500, and
+it carries the name of the stage that failed.
+**Why:** D8 split errors into caller-fault (`TypeWrightError` → 400) and our-fault (→ 500) by
+type. Contract inference is the first step that can fail without the caller doing anything
+wrong, so it needs the 500 side — but a bare 500 is unhelpful. The brief says a 500 response
+should report the failing stage (§7.1); carrying `stage` on the exception lets the HTTP layer
+include it without inspecting messages.
+
+### D16 — Conservative LLM call-tuning defaults
+**Decision:** Default LLM call tuning lives in `Settings`: `llm_timeout_seconds = 30.0`,
+`llm_max_retries = 2` (Instructor reasks on schema-invalid output), `llm_max_tokens = 1024`.
+**Why:** Contracts are small, so a 1024-token ceiling is ample and keeps each call cheap; a 30s
+timeout bounds latency so a slow provider can't hang a request; two reasks recover from the
+occasional malformed model output without looping forever. Centralising them in `Settings` (D9)
+means they're tunable per environment without code changes.
+
+### D17 — LiteLLM as the model gateway, with three model tiers
+**Decision:** Call models through **LiteLLM** using provider-prefixed IDs
+(`anthropic/claude-...`). Expose `economy` / `standard` / `premium` tiers mapped to concrete
+models in `Settings`, with `default_model_tier = "standard"` and `model_for_tier()` falling
+back to the standard model for any unknown tier.
+**Why:** TypeWright wants a tiered, swappable model story: callers (and the brief's `model_tier`
+field) pick by intent — cost vs. capability — without hard-coding model IDs at call sites, and
+the model behind each tier (or the provider itself) changes in one place. LiteLLM gives one
+call shape across providers/models, so swapping a backend is a config change, not a code
+change, and the `anthropic/` prefix is just how LiteLLM routes. Falling back to `standard`
+means a stale or mistyped tier degrades gracefully rather than erroring. Trade-off: LiteLLM
+sits a layer above any single provider's SDK, so provider-specific features (e.g. Anthropic
+prompt caching, adaptive-thinking controls) aren't first-class — revisit for the hot path if a
+later phase needs them. Model IDs verified against the current catalog (Haiku 4.5 / Sonnet 4.6
+/ Opus 4.8); the bare aliases are correct and must **not** carry date suffixes.

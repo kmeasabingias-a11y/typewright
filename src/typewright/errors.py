@@ -49,4 +49,18 @@ class AmbiguousFunctionError(TypeWrightError):
             f"Multiple top-level functions found ({joined}); "
             "specify `function_name` to choose one."
         )
-        
+
+
+class PipelineError(Exception):
+    """An internal analysis stage failed — our fault, not the caller's (500).
+
+    Deliberately NOT a ``TypeWrightError``: the caller's input was fine, but a
+    stage of the pipeline (e.g. LLM contract inference) could not complete.
+    ``stage`` names the failing step so the API can include it in the 500
+    response (§7.1: "500 ... Response includes failure stage"; D15).
+    """
+
+    def __init__(self, stage: str, detail: str) -> None:
+        self.stage = stage
+        self.detail = detail
+        super().__init__(f"Pipeline stage {stage!r} failed: {detail}")
