@@ -130,3 +130,32 @@ sits a layer above any single provider's SDK, so provider-specific features (e.g
 prompt caching, adaptive-thinking controls) aren't first-class — revisit for the hot path if a
 later phase needs them. Model IDs verified against the current catalog (Haiku 4.5 / Sonnet 4.6
 / Opus 4.8); the bare aliases are correct and must **not** carry date suffixes.
+
+### D18 — The LLM layer lives in one `inference.py`
+**Decision:** A single `inference.py` module owns both the Instructor-wrapped LiteLLM client
+(built from `Settings`) and the `infer_contract(meta: FunctionMetadata) -> Contract` entry
+point.
+**Why:** Phase 2 makes exactly one kind of LLM call; one module is the fewest moving parts and
+matches the brief's "simpler beats cleverer." Splitting client plumbing from orchestration (or
+a dedicated `llm/` package) only earns its keep once a second caller exists — Phase 3
+(strategy / test generation) is the likely trigger, and the split can happen then without
+disturbing this unit.
+
+### D19 — Phase 2 infers contracts in a single structured call (MVP)
+**Decision:** Contract inference is one structured Instructor + LiteLLM call: send the function
+source, get back a validated `Contract`, relying on D13's reask retries for malformed output.
+No agentic draft → critique → refine loop yet.
+**Why:** A single call is the smallest thing that produces a real contract and lets the rest of
+the pipeline (Phase 3 onward) start consuming it. The agentic, multi-step approach from the
+source research (arXiv:2510.09907) costs more tokens, latency, and code to test; defer it until
+contract *quality* is shown to need it, and add it then as a measured improvement rather than
+upfront complexity.
+
+### D20 — Build inference standalone first; wire `/v1/analyze` in the next unit
+**Decision:** This unit delivers `infer_contract` plus its tests in isolation — the model is
+mocked so tests need no live API key. Evolving `AnalyzeResponse` to include `contract` and
+wiring the route is a separate, following unit.
+**Why:** Keeps units small and independently shippable (the Phase 1 cadence). Mocking the LLM
+keeps the test suite fast, deterministic, and runnable in CI with no secret, and defers the
+question of how the live key reaches CI to the unit that actually needs it. Same spirit as D12
+(ship the smaller useful surface; defer the rest until a feature needs it).
