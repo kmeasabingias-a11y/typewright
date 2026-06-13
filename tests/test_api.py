@@ -1,14 +1,20 @@
 """Tests for the HTTP surface (``POST /v1/analyze`` and ``/health``).
 
 These drive the real FastAPI app through FastAPI's TestClient, asserting the
-status-code contract (200 success, 400 caller error, 422 malformed request) and
-that the response carries only the honest Phase 1 subset (DECISIONS.md D5, D8).
+status-code contract (200 success, 400 caller error, 422 malformed request,
+500 pipeline failure) and that the response carries only the honest Phase 2
+subset: function + contract (DECISIONS.md D5, D8, D21). Contract inference is
+mocked via the ``get_infer_contract`` dependency (conftest), so no live LLM key
+is needed.
 """
+
+from typewright.errors import PipelineError
+from typewright.models import Contract
 
 
 def test_health_returns_ok(client):
     resp = client.get("/health")
-    
+
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
 
@@ -28,13 +34,48 @@ def test_analyze_returns_parsed_function(client):
 
 
 def test_analyze_returns_only_the_honest_subset(client):
-    """Phase 1 returns just analysis_id + function — no contract/bugs_found."""
+    """Phase 2 returns analysis_id + function + contract — not bugs_found/fix yet."""
     resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
 
     body = resp.json()
-    assert set(body.keys()) == {"analysis_id", "function"}
-    assert "contract" not in body
+    assert set(body.keys()) == {"analysis_id", "function", "contract"}
+    assert set(body["contract"].keys()) == {
+        "preconditions",
+        "postconditions",
+        "invariants",
+    }
     assert "bugs_found" not in body
+    assert "fix_suggestion" not in body
+
+
+def test_analyze_includes_inferred_contract(client):
+    """The mocked inference result is surfaced in the response."""
+    resp = client.post(
+        "/v1/analyze", json={"code": "def add(a, b):\n    return a + b"}
+    )
+
+    assert resp.status_code == 200
+    contract = resp.json()["contract"]
+    assert contract["preconditions"] == ["inputs are valid"]
+    assert contract["invariants"] == ["inputs are not mutated"]
+
+
+def test_model_tier_is_passed_to_inference(make_client):
+    """The request's model_tier reaches the inference step verbatim."""
+    seen = {}
+
+    def infer(meta, *, model_tier=None):
+        seen["tier"] = model_tier
+        return Contract()
+
+    client = make_client(infer)
+    resp = client.post(
+        "/v1/analyze",
+        json={"code": "def f():\n    pass", "model_tier": "premium"},
+    )
+
+    assert resp.status_code == 200
+    assert seen["tier"] == "premium"
 
 
 def test_analyze_with_function_name(client):
@@ -91,3 +132,21 @@ def test_missing_code_field_is_422(client):
     resp = client.post("/v1/analyze", json={})
 
     assert resp.status_code == 422
+
+
+# --- Pipeline failure (our fault, not the caller's) is 500 with the stage -----
+
+
+def test_pipeline_failure_is_500_with_stage(make_client):
+    """A PipelineError from inference becomes a 500 naming the failing stage (D15)."""
+
+    def infer(meta, *, model_tier=None):
+        raise PipelineError("contract_inference", "model unavailable")
+
+    client = make_client(infer)
+    resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
+
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["stage"] == "contract_inference"
+    assert "contract_inference" in body["detail"]

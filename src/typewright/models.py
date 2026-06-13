@@ -94,10 +94,26 @@ class AnalyzeRequest(BaseModel):
             "top-level function."
             ),
     )
+    model_tier: str | None = Field(
+        default=None,
+        description=(
+            "Model tier for contract inference: 'economy', 'standard', or "
+            "'premium'. Optional; falls back to the configured default, and an "
+            "unknown tier degrades to 'standard' (D17). Other spec'd request "
+            "fields (include_fix_suggestion, max_test_runtime_seconds) arrive "
+            "with the phases that use them (D22)."
+        ),
+    )
 
 
 class AnalyzeResponse(BaseModel):
-    """Response of POST /v1/analyze (Phase 1: parsed function only)."""
+    """Response of POST /v1/analyze.
+
+    Phase 2: the parsed ``function`` plus its inferred ``contract``. The later
+    fields the API spec promises (``bugs_found``, ``fix_suggestion``,
+    ``metadata``) appear only once their phases make them real (D5).
+    """
 
     analysis_id: str
     function: AnalyzedFunction
+    contract: Contract
