@@ -55,7 +55,7 @@ class PipelineError(Exception):
     """An internal analysis stage failed — our fault, not the caller's (500).
 
     Deliberately NOT a ``TypeWrightError``: the caller's input was fine, but a
-    stage of the pipeline (e.g. LLM contract inference) could not complete.
+    stage of the pipeline (e.g. LLM property detection) could not complete.
     ``stage`` names the failing step so the API can include it in the 500
     response (§7.1: "500 ... Response includes failure stage"; D15).
     """

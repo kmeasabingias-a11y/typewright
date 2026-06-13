@@ -14,17 +14,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix ="TYPEWRIGHT_",
+        env_prefix="TYPEWRIGHT_",
         env_file=".env",
         env_file_encoding="utf-8",
-        extra = "ignore",
+        extra="ignore",
     )
 
     app_name: str = "TypeWright"
     environment: str = "dev"
     log_level: str = "INFO"
 
-    # --- LLM / contract inference (Phase 2) ---
+    # --- LLM / property detection (Phase 2) ---
     # Read from ANTHROPIC_API_KEY (no TYPEWRIGHT_ prefix) so the standard
     # provider env var works, or TYPEWRIGHT_ANTHROPIC_API_KEY if you prefer the
     # project prefix. Passed explicitly to the LLM client (D13).
@@ -43,8 +43,9 @@ class Settings(BaseSettings):
     default_model_tier: str = "standard"
 
     llm_timeout_seconds: float = 30.0
-    llm_max_retries: int = 2    # Instructor reask attempts on invalid output
-    llm_max_tokens: int = 1024  # contracts are small
+    llm_max_retries: int = 2      # Instructor reask attempts on invalid output
+    llm_max_tokens: int = 1024    # detected-property lists are small
+    llm_temperature: float = 0.0  # deterministic detection; low temp curbs fabrication
 
     def model_for_tier(self, tier: str) -> str:
         """Resolve a request's ``model_tier`` to a concrete model string.
@@ -58,11 +59,12 @@ class Settings(BaseSettings):
             "premium": self.model_premium,
         }.get(tier, self.model_standard)
 
+
 @lru_cache
 def get_settings() -> Settings:
     """Return the process-wide Settings singleton.
 
-      ``lru_cache`` makes this return the same instance every call, so settings
-      are read from the environment exactly once.
-      """
+    ``lru_cache`` makes this return the same instance every call, so settings
+    are read from the environment exactly once.
+    """
     return Settings()

@@ -75,9 +75,11 @@ premature given D1.
 **Decision:** Target 3.12; minimum supported 3.11.
 **Why:** Brief specifies 3.11+; 3.12 is a safe modern default. `ast.unparse` is 3.9+.
 
-## Phase 2 — LLM Contract Inference
+## Phase 2 — LLM Property Detection (was: Contract Inference — redirected by D23)
 
 ### D13 — Structured contract output via Instructor; API key passed explicitly
+**Amended by D23:** mechanism (Instructor structured output + explicit key) still holds; the
+model is now `PropertyDetection`, not `Contract`.
 **Decision:** Get the `Contract` back as a validated Pydantic object using **Instructor**
 (which re-asks the model, up to `llm_max_retries` times, when the output doesn't fit the
 schema) rather than hand-parsing free-form text. Read the provider key from
@@ -90,6 +92,8 @@ configuration in one typed place (D9) and makes the call testable — a test can
 key/client without mutating the process environment.
 
 ### D14 — Contract shape: preconditions / postconditions / invariants
+**Superseded by D23/D24** — Phase 2 is property-class detection; the `Contract` shape is
+removed. Kept for the record.
 **Decision:** Model the inferred contract as three lists of plain-language strings —
 `preconditions`, `postconditions`, `invariants` — matching the brief's API spec (§7.1).
 **Why:** It's the shape the spec promises callers and the shape Phase 3 consumes to generate
@@ -159,3 +163,75 @@ wiring the route is a separate, following unit.
 keeps the test suite fast, deterministic, and runnable in CI with no secret, and defers the
 question of how the live key reaches CI to the unit that actually needs it. Same spirit as D12
 (ship the smaller useful surface; defer the rest until a feature needs it).
+
+### D21 — `/v1/analyze` runs contract inference; inference injected as a dependency
+**Decision:** The endpoint now parses the function *and* infers its `Contract`, returning
+`{ analysis_id, function, contract }` (D5 grows by one honest field). Contract inference is
+reached through a FastAPI dependency (`get_infer_contract`) rather than called inline, and a
+`PipelineError` maps to HTTP 500 with the failing `stage` in the body.
+**Why:** This is the Phase 2 exit criterion — "POST /analyze returns contract JSON alongside
+AST." Injecting the inference step gives tests a clean seam (`app.dependency_overrides`) so the
+whole HTTP suite runs deterministically with no live LLM key, instead of monkeypatching module
+internals — and it's the idiomatic FastAPI test seam. The 500+stage mapping is the §7.1 contract
+for our-fault failures (D15); the handler reads `stage` off the exception so the body can report
+it.
+
+### D22 — Request gains only `model_tier`; other §7.1 fields deferred
+**Decision:** `AnalyzeRequest` adds `model_tier` (the field Phase 2 actually uses). The other
+request fields the spec lists — `include_fix_suggestion`, `max_test_runtime_seconds` — are not
+added yet; Pydantic ignores them if sent.
+**Why:** Same honesty rule as D5, applied to the request: don't advertise a knob that does
+nothing. `model_tier` drives tier selection now (D17); fix-suggestion and runtime-budget belong
+to the phases that implement them (6 and 5), and arrive then.
+
+### D23 — Phase 2 is property-class DETECTION, not contract inference (supersedes D14)
+**Decision:** Replace "infer preconditions/postconditions/invariants" with detecting which
+well-known PROPERTY CLASSES a function fits — round-trip, idempotence, invariant-preservation,
+metamorphic, type-postcondition, totality. The LLM reasons from name/signature/type
+hints/docstring and RECOGNIZES classes rather than synthesizing a bespoke spec; it signals
+uncertainty with low confidence instead of fabricating. No dual path — the contract approach is
+removed.
+**Why:** Inferring a spec from the body and testing the body against it is circular: the oracle
+is the implementation, so tests pass by construction and catch only crashes. Property classes are
+implementation-independent oracles (`parse(format(x)) == x` holds regardless of how `parse` is
+written), so they catch silent wrong-answer bugs — the actual point of PBT. Recognition also
+plays to LLM strengths (classification) over their weakness (precise spec synthesis). This
+diverges from the brief's literal Step 2 but is more faithful to PBT fundamentals and the prior
+art (arXiv:2510.09907). D13/D17/D18/D19 still hold; D21/D22 still hold with the response field
+renamed `contract`->`properties` and the pipeline stage `contract_inference`->`property_detection`.
+The maintained spec is now `PROJECT_BRIEF.md` (the PDF is the original record).
+
+### D24 — Property-analysis data shape
+**Decision:** `DetectedProperty` carries: `property_class` (enum), a concrete TESTABLE `relation`
+(e.g. `parse(format(x)) == x`, not prose), optional `companion_function` (round-trip inverse),
+`rationale`, and `confidence` (0–1, enforced). The LLM returns a `PropertyDetection` (list only);
+we assemble `PropertyAnalysis` = detected list + AST-declared `input_types`/`return_type`.
+**Why:** A testable relation is what Phase 3 turns straight into a Hypothesis test; confidence
+lets later phases threshold/verify and is the anti-fabrication signal. Carrying the AST types in
+the analysis makes it a self-contained payload for downstream phases (a small, deliberate overlap
+with `function`). Keeping the LLM's output narrow (properties only) stops it echoing or
+hallucinating types we already have from the AST.
+
+### D25 — Low temperature + few-shot for detection
+**Decision:** `llm_temperature = 0.0` (in `Settings`), and two few-shot examples in the system
+prompt.
+**Why:** Detection should be stable and reproducible, and low temperature curbs the model's
+tendency to invent properties to look useful (reinforcing D23's confidence-not-fabrication rule).
+Few-shot examples anchor the output format (testable relation, companion function, confidence)
+better than instructions alone.
+
+### D26 — value/output-postcondition class, on the tightest leash
+**Decision:** Add a `value_postcondition` property class: a testable constraint on the output
+VALUE (e.g. `result >= 0`, `0 <= result <= price`, a probability in `[0, 1]`). The constraint
+must be derived from the function's INTENT (name/signature/docstring), never from what the body
+computes; the model emits it with low confidence when guessing and is instructed to omit it
+rather than fabricate. It is preferred over `totality`. The Phase 2 golden set includes 2–3 plain
+business-logic functions to confirm the class catches them — gap-closing stays inside Phase 2.
+**Why:** The relational classes (round-trip/idempotence/invariant/metamorphic) don't cover plain
+business logic (`calculate_tax`, `apply_discount`, `clamp`), which would otherwise get only the
+weak crash-only `totality`. A value postcondition is a real, executable, implementation-
+independent oracle for those — but ONLY if it comes from intent, not the body, else it is exactly
+the circular oracle D23 rejects. It is the most powerful class and the most fabrication-prone,
+hence the tightest leash. The report-time false-positive guard for a wrong postcondition (a
+phantom bug against correct code) is recorded in `PROJECT_BRIEF.md` §8 as a Phase 5/6 concern,
+deliberately not built in Phase 2.

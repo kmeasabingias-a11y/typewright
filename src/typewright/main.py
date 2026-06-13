@@ -1,10 +1,10 @@
 """FastAPI application: TypeWright's public HTTP surface.
 
 Phase 2 exposes two routes: a ``/health`` liveness check and ``POST /v1/analyze``,
-which parses a Python function and returns its metadata plus the LLM-inferred
-``contract`` (DECISIONS.md D4, D5, D21). Test generation and sandbox execution
-arrive in later phases; this endpoint returns only the honest subset it can
-produce today.
+which parses a Python function and returns its metadata plus the property classes
+it appears to satisfy (DECISIONS.md D4, D5, D21, D23). Test generation and sandbox
+execution arrive in later phases; this endpoint returns only the honest subset it
+can produce today.
 
 The app is built by a ``create_app()`` factory so tests can construct a fresh,
 fully-configured instance, while ``app`` at module scope is what ``uvicorn`` serves
@@ -20,22 +20,23 @@ from fastapi.responses import JSONResponse
 
 from .config import get_settings
 from .errors import PipelineError, TypeWrightError
-from .inference import infer_contract
+from .inference import infer_properties
 from .logging_config import configure_logging
-from .models import AnalyzedFunction, AnalyzeRequest, AnalyzeResponse, Contract
+from .models import AnalyzedFunction, AnalyzeRequest, AnalyzeResponse, PropertyAnalysis
 from .parser import parse_function
 
 logger = logging.getLogger("typewright")
 
 
-def get_infer_contract() -> Callable[..., Contract]:
-    """Dependency provider for the contract-inference step.
+def get_infer_properties() -> Callable[..., PropertyAnalysis]:
+    """Dependency provider for the property-detection step.
 
     Returning the function (rather than calling it inline) gives tests a clean
-    seam: ``app.dependency_overrides[get_infer_contract]`` swaps in a fake that
-    returns a known ``Contract``, so API tests run with no live LLM key (D21).
+    seam: ``app.dependency_overrides[get_infer_properties]`` swaps in a fake that
+    returns a known ``PropertyAnalysis``, so API tests run with no live LLM key
+    (D21).
     """
-    return infer_contract
+    return infer_properties
 
 
 def create_app() -> FastAPI:
@@ -65,7 +66,7 @@ def create_app() -> FastAPI:
         """Map an internal pipeline failure to 500, naming the failing stage.
 
         The caller's input was valid (it parsed), but a stage of our own analysis
-        — e.g. LLM contract inference — could not complete (D15). §7.1 requires
+        — e.g. LLM property detection — could not complete (D15). §7.1 requires
         the 500 body to report the failing stage, so it's included here.
         """
         logger.error("pipeline stage %r failed: %s", exc.stage, exc.detail)
@@ -82,20 +83,20 @@ def create_app() -> FastAPI:
     @app.post("/v1/analyze", response_model=AnalyzeResponse)
     def analyze(
         request: AnalyzeRequest,
-        infer: Callable[..., Contract] = Depends(get_infer_contract),
+        infer: Callable[..., PropertyAnalysis] = Depends(get_infer_properties),
     ) -> AnalyzeResponse:
-        """Parse one Python function and infer its semantic contract (Phase 2).
+        """Parse one Python function and detect its property classes (Phase 2).
 
-        Parsing failures are caller errors (-> 400); a failure inside contract
-        inference raises ``PipelineError`` (-> 500 with the failing stage).
+        Parsing failures are caller errors (-> 400); a failure inside property
+        detection raises ``PipelineError`` (-> 500 with the failing stage).
         """
         metadata = parse_function(request.code, request.function_name)
-        contract = infer(metadata, model_tier=request.model_tier)
+        properties = infer(metadata, model_tier=request.model_tier)
         logger.info("analyzed function %r", metadata.name)
         return AnalyzeResponse(
             analysis_id=str(uuid.uuid4()),
             function=AnalyzedFunction.from_metadata(metadata),
-            contract=contract,
+            properties=properties,
         )
 
     return app
