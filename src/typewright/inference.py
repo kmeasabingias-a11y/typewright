@@ -19,10 +19,10 @@ temperature (D25). Any failure of this stage becomes a ``PipelineError`` (stage
 from __future__ import annotations
 
 import instructor
-from litellm import completion
 
 from .config import Settings, get_settings
 from .errors import PipelineError
+from .llm import build_client
 from .models import FunctionMetadata, PropertyAnalysis, PropertyDetection
 
 _STAGE = "property_detection"
@@ -96,7 +96,7 @@ def _client() -> instructor.Instructor:
     Factored out so tests can monkeypatch it with a fake that returns a known
     ``PropertyDetection`` instead of calling a real model.
     """
-    return instructor.from_litellm(completion)
+    return build_client()
 
 
 def infer_properties(

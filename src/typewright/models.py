@@ -103,6 +103,39 @@ class PropertyAnalysis(BaseModel):
     return_type: str | None = None
 
 
+class GeneratedStrategy(BaseModel):
+    """One Hypothesis strategy for a single function argument (Phase 3, D29).
+
+    ``strategy`` is a Python expression usable directly in ``@given(arg=<strategy>)``,
+    e.g. ``"st.integers()"`` or ``"st.text(min_size=1)"``. ``confidence`` is low when
+    the model is guessing a domain rather than reading it off the type.
+    """
+
+    argument: str = Field(..., description="The parameter this strategy generates values for.")
+    strategy: str = Field(
+        ...,
+        description="A Hypothesis strategy expression, e.g. 'st.integers()' — usable in @given.",
+    )
+    rationale: str = Field(..., description="Why this strategy fits the argument. Brief.")
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description= "0–1; low when guessing the domain rather than reading the type.",
+    )
+
+
+class StrategyPlan(BaseModel):
+    """Phase 3 result: one Hypothesis strategy per argument, plus any extra imports.
+
+    The LLM returns this directly (D29). ``extra_imports`` lists anything a strategy needs
+    beyond ``from hypothesis import strategies as st`` (e.g. ``"import base64"``).
+    """
+
+    strategies: list[GeneratedStrategy] = Field(default_factory=list)
+    extra_imports: list[str] = Field(default_factory=list)
+
+
 class AnalyzedFunction(BaseModel):
     """The lean, API-facing view of a parsed function."""
 

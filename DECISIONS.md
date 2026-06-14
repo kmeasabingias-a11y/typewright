@@ -235,3 +235,43 @@ the circular oracle D23 rejects. It is the most powerful class and the most fabr
 hence the tightest leash. The report-time false-positive guard for a wrong postcondition (a
 phantom bug against correct code) is recorded in `PROJECT_BRIEF.md` §8 as a Phase 5/6 concern,
 deliberately not built in Phase 2.
+
+## Phase 3 — Strategy Generation
+
+### D27 — Strategy generation lives in a new `generation.py`; the LLM client is shared via `llm.py`
+**Decision:** Phase 3's strategy generation is a new module `generation.py`
+(`generate_strategies`), not more code bolted onto `inference.py`. The Instructor-wrapped LiteLLM
+client construction is lifted out of `inference.py` into a shared `llm.py` (`build_client()`);
+both `inference.py` and `generation.py` keep a thin module-level `_client()` that delegates to it.
+**Why:** This is exactly the split D18 deferred to "the Phase 3 (strategy / test generation)
+trigger." Now that a *second* LLM caller exists, the provider/Instructor wiring belongs in one
+place, and a module per analysis step keeps each focused (detection vs. generation). Keeping each
+module's own `_client()` seam means the existing inference tests (which monkeypatch
+`inference._client`) stay green and Phase 2 is undisturbed — D18's own caveat. The common *call*
+shape (the `create(...)` kwargs + `PipelineError` wrapping) is left duplicated across the two
+modules for now; it can be hoisted into `llm.py` once a third caller (Phase 4 test-gen) proves the
+pattern. Simpler beats cleverer until the duplication actually bites.
+
+### D28 — Phase 3 Unit 1 is standalone; `/v1/analyze` wiring is a later unit
+**Decision:** Unit 1 ships `generate_strategies` plus its mocked tests only; the endpoint is not
+touched. Evolving `AnalyzeResponse` to carry the strategies (and calling generation from the
+route) is a separate, following unit.
+**Why:** Same cadence as D20 in Phase 2 — small, independently shippable units, with the LLM
+mocked so the suite stays fast, deterministic, and key-less in CI. Per the D5 honesty rule the
+response shape changes only when the wiring unit makes the field real, so the public API and the
+`PROJECT_BRIEF.md` spec are untouched by this unit.
+
+### D29 — Strategy-generation output shape: a `StrategyPlan` of `GeneratedStrategy`, returned as-is
+**Decision:** `generate_strategies` returns a `StrategyPlan` = a list of `GeneratedStrategy`
+(`argument`, a `strategy` *expression* like `st.integers()`, `rationale`, a range-checked
+`confidence`) plus `extra_imports`. The LLM produces the whole `StrategyPlan` in one structured
+call (`response_model=StrategyPlan`) at low temperature with few-shot, and the function returns it
+**directly** — no AST bolt-on.
+**Why:** A per-argument strategy *expression* is what Phase 4 drops straight into
+`@given(arg=<strategy>)`, and `extra_imports` carries anything beyond `from hypothesis import
+strategies as st`. The shape deliberately mirrors Phase 2's `DetectedProperty`/`confidence`
+pattern (D24) so the two LLM steps read alike, and `confidence` is the same anti-fabrication /
+thresholding signal. Unlike `infer_properties` (which merges AST types into its result),
+generation has no extra AST facts to add — the strategies *are* the generated content — so it
+returns the model's `StrategyPlan` unchanged. A coverage check (assert every argument got a
+strategy) is a deliberate later refinement, not in the MVP.
