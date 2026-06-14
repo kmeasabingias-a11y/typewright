@@ -183,12 +183,13 @@ class AnalyzeRequest(BaseModel):
 class AnalyzeResponse(BaseModel):
     """Response of POST /v1/analyze.
 
-    Phase 2: the parsed ``function`` plus the ``properties`` it appears to satisfy
-    — the well-known property classes the LLM recognized (D23). The later fields
-    the API spec promises (``bugs_found``, ``fix_suggestion``, ``metadata``)
+    Phase 3: the parsed ``function``, the ``properties`` it appears to satisfy (D23),
+    and the ``strategy_plan`` — a Hypothesis strategy per argument (D29, D30). The
+    later fields the spec promises (``bugs_found``, ``fix_suggestion``, ``metadata``)
     appear only once their phases make them real (D5).
     """
 
     analysis_id: str
     function: AnalyzedFunction
     properties: PropertyAnalysis
+    strategy_plan: StrategyPlan

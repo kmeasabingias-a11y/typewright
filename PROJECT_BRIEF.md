@@ -153,6 +153,12 @@ of `economy` / `standard` / `premium` (unknown → standard). `include_fix_sugge
     "input_types": { "v": "str" },
     "return_type": "tuple[int, int, int]"
   },
+  "strategy_plan": {
+    "strategies": [
+      { "argument": "v", "strategy": "st.text()", "rationale": "any string is valid input to a parser", "confidence": 0.7 }
+    ],
+    "extra_imports": []
+  },
   "bugs_found": [ { "failing_input": "\"\"", "error": "IndexError", "violated_property": "...", "severity": "crash" } ],
   "fix_suggestion": { "code": "...", "verified": true, "tests_passed": 47, "tests_failed": 0 },
   "metadata": { "analysis_duration_ms": 0, "llm_cost_usd": 0.0, "tests_generated": 0, "tests_run": 0, "hypothesis_examples_tried": 0 }

@@ -9,7 +9,7 @@ key is needed.
 """
 
 from typewright.errors import PipelineError
-from typewright.models import PropertyAnalysis
+from typewright.models import PropertyAnalysis, StrategyPlan
 
 
 def test_health_returns_ok(client):
@@ -34,16 +34,17 @@ def test_analyze_returns_parsed_function(client):
 
 
 def test_analyze_returns_only_the_honest_subset(client):
-    """Phase 2 returns analysis_id + function + properties — not bugs_found/fix yet."""
+    """Phase 3 returns analysis_id + function + properties + strategy_plan — not bugs/fix yet."""
     resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
 
     body = resp.json()
-    assert set(body.keys()) == {"analysis_id", "function", "properties"}
+    assert set(body.keys()) == {"analysis_id", "function", "properties", "strategy_plan"}
     assert set(body["properties"].keys()) == {
         "detected",
         "input_types",
         "return_type",
     }
+    assert set(body["strategy_plan"].keys()) == {"strategies", "extra_imports"}
     assert "bugs_found" not in body
     assert "fix_suggestion" not in body
 
@@ -94,6 +95,47 @@ def test_analysis_id_is_unique_per_call(client):
 
     assert first != second
 
+
+def test_analyze_includes_generated_strategies(client):
+    """The mocked strategy plan is surfaced in the response."""
+    resp = client.post("/v1/analyze", json={"code": "def f(x):\n    return x"})
+
+    assert resp.status_code == 200
+    plan = resp.json()["strategy_plan"]
+    assert plan["strategies"][0]["argument"] == "x"
+    assert plan["strategies"][0]["strategy"] == "st.text()"
+
+
+def test_model_tier_is_passed_to_generation(make_client):
+    """The request's model_tier reaches the generation step verbatim."""
+    seen = {}
+
+    def gen(meta, analysis, *, model_tier=None):
+        seen["tier"] = model_tier
+        return StrategyPlan()
+
+    client = make_client(gen=gen)
+    resp = client.post(
+        "/v1/analyze", json={"code": "def f():\n    pass", "model_tier": "premium"}
+    )
+
+    assert resp.status_code == 200
+    assert seen["tier"] == "premium"
+
+
+def test_generation_failure_is_500_with_stage(make_client):
+    """A PipelineError from generation becomes a 500 naming the failing stage (D15, D30)."""
+
+    def gen(meta, analysis, *, model_tier=None):
+        raise PipelineError("strategy_generation", "model unavailable")
+
+    client = make_client(gen=gen)
+    resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
+
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["stage"] == "strategy_generation"
+    assert "strategy_generation" in body["detail"]
 
 # --- Caller errors map to 400 (the TypeWrightError family) ------------------
 

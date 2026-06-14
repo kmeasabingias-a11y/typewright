@@ -275,3 +275,24 @@ thresholding signal. Unlike `infer_properties` (which merges AST types into its 
 generation has no extra AST facts to add — the strategies *are* the generated content — so it
 returns the model's `StrategyPlan` unchanged. A coverage check (assert every argument got a
 strategy) is a deliberate later refinement, not in the MVP.
+
+### D30 — `/v1/analyze` runs the full chain; response gains `strategy_plan`; always-on, all-or-nothing
+**Decision:** The endpoint now parses → detects properties → **generates strategies**, returning
+`{ analysis_id, function, properties, strategy_plan }`. Strategy generation is reached through a
+`get_generate_strategies` FastAPI dependency (mirroring `get_infer_properties`, D21) and runs
+**unconditionally** on every request — no opt-out flag. The request's `model_tier` drives **both**
+LLM calls. Failure handling stays **all-or-nothing**: any stage raising `PipelineError` → 500
+naming the stage (D15), so a generation failure after a successful detection still 500s rather
+than returning a partial result. The new response field is **`strategy_plan`** (a `StrategyPlan`),
+not `strategies`.
+**Why:** This is the Phase 3 wiring increment D28 deferred. Always-on keeps the endpoint's
+contract simple — "analyze" means the whole pipeline — and matches the brief's deterministic-chain
+model; the extra LLM call's cost/latency is an explicit Phase 9 concern, not a reason to add a knob
+now (D22). All-or-nothing keeps the response honest (no half-analysis masquerading as complete) and
+reuses the existing `PipelineError`→500+stage contract. The dependency seam keeps the HTTP suite
+key-less (D21). The field is named `strategy_plan` because naming it `strategies` would nest as
+`strategies.strategies` in the JSON (the `StrategyPlan`'s own list is `strategies`); `strategy_plan`
+reads cleanly beside `properties` (whose inner field is `detected`). This field was **not** in the
+brief's §5 response (strategies had been left as an internal artifact); exposing it is a small,
+deliberate extension recorded in `PROJECT_BRIEF.md` §5, consistent with the D5 "expose once real"
+rule.
