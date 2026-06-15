@@ -1,10 +1,11 @@
 """FastAPI application: TypeWright's public HTTP surface.
 
-Phase 3 exposes two routes: a ``/health`` liveness check and ``POST /v1/analyze``,
-which parses a Python function, detects the property classes it satisfies, and
-generates a Hypothesis strategy per argument (DECISIONS.md D4, D5, D21, D23, D30).
-Bug-finding, fix suggestions, and sandbox execution arrive in later phases; this
-endpoint returns only the honest subset it can produce today.
+Phase 4 exposes two routes: a ``/health`` liveness check and ``POST /v1/analyze``,
+which parses a Python function, detects the property classes it satisfies, generates
+a Hypothesis strategy per argument, and generates a complete pytest file asserting
+those properties (DECISIONS.md D4, D5, D21, D23, D30, D36). Bug-finding, fix
+suggestions, and sandbox execution arrive in later phases; this endpoint returns only
+the honest subset it can produce today.
 
 The app is built by a ``create_app()`` factory so tests can construct a fresh,
 fully-configured instance, while ``app`` at module scope is what ``uvicorn`` serves
@@ -23,8 +24,16 @@ from .errors import PipelineError, TypeWrightError
 from .generation import generate_strategies
 from .inference import infer_properties
 from .logging_config import configure_logging
-from .models import AnalyzedFunction, AnalyzeRequest, AnalyzeResponse, PropertyAnalysis, StrategyPlan
+from .models import (
+    AnalyzedFunction,
+    AnalyzeRequest,
+    AnalyzeResponse,
+    GeneratedTestFile,
+    PropertyAnalysis,
+    StrategyPlan,
+)
 from .parser import parse_function
+from .testgen import generate_test_file
 
 logger = logging.getLogger("typewright")
 
@@ -48,6 +57,16 @@ def get_generate_strategies() -> Callable[..., StrategyPlan]:
     key (D21, D28, D30).
     """
     return generate_strategies
+
+
+def get_generate_test_file() -> Callable[..., GeneratedTestFile]:
+    """Dependency provider for the test-file-generation step.
+
+    Mirrors the other two providers: returning the function lets tests override it
+    via ``app.dependency_overrides[get_generate_test_file]`` and run with no live
+    key (D21, D30, D36).
+    """
+    return generate_test_file
 
 
 def create_app() -> FastAPI:
@@ -96,23 +115,28 @@ def create_app() -> FastAPI:
         request: AnalyzeRequest,
         infer: Callable[..., PropertyAnalysis] = Depends(get_infer_properties),
         gen: Callable[..., StrategyPlan] = Depends(get_generate_strategies),
+        gen_tests: Callable[..., GeneratedTestFile] = Depends(get_generate_test_file),
     ) -> AnalyzeResponse:
-        """Parse a function, detect its property classes, and generate strategies (Phase 3).
+        """Parse, detect properties, generate strategies, then generate a pytest file (Phase 4).
 
-        Parsing failures are caller errors (-> 400); a failure inside either LLM
-        stage raises ``PipelineError`` (-> 500 with the failing stage). The chain is
-        all-or-nothing: a generation failure after a successful detection still 500s
-        (D30).
+        Parsing failures are caller errors (-> 400); a failure inside any LLM stage
+        raises ``PipelineError`` (-> 500 with the failing stage). The chain is
+        all-or-nothing: a failure in any step 500s rather than returning a partial
+        result, so a 200 always carries a full ``test_file`` (D30, D36).
         """
         metadata = parse_function(request.code, request.function_name)
         properties = infer(metadata, model_tier=request.model_tier)
-        strategy_plan= gen(metadata, properties, model_tier=request.model_tier)
+        strategy_plan = gen(metadata, properties, model_tier=request.model_tier)
+        test_file = gen_tests(
+            metadata, properties, strategy_plan, model_tier=request.model_tier
+        )
         logger.info("analyzed function %r", metadata.name)
         return AnalyzeResponse(
             analysis_id=str(uuid.uuid4()),
             function=AnalyzedFunction.from_metadata(metadata),
             properties=properties,
             strategy_plan=strategy_plan,
+            test_file=test_file,
         )
 
     return app

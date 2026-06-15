@@ -369,3 +369,24 @@ dropping properties. Standalone-first matches every prior phase (D20, D28): smal
 shippable, suite stays fast and key-less; the response shape changes only when the wiring unit makes
 `test_file` real (the D5 honesty rule), so the public API and `PROJECT_BRIEF.md` §5 are untouched by
 this unit.
+
+### D36 — `/v1/analyze` runs the full four-step chain; response gains `test_file`; always-on, all-or-nothing
+**Decision:** The endpoint now parses → detects properties → generates strategies → **generates the
+test file**, returning `{ analysis_id, function, properties, strategy_plan, test_file }`. Test
+generation is reached through a third `get_generate_test_file` FastAPI dependency (mirroring
+`get_infer_properties`/`get_generate_strategies`, D21/D30) and runs **unconditionally**; the request's
+`model_tier` drives all three LLM calls. Failure handling stays **all-or-nothing**: any stage raising
+`PipelineError` → 500 naming the stage (D15), so a test-generation failure 500s rather than returning a
+partial result. The new response field is **`test_file`** (a `GeneratedTestFile`), and a 200 always
+carries a full one.
+**Why:** This is the Phase 4 wiring increment D35 deferred. Always-on keeps the endpoint's contract
+simple — "analyze" means the whole pipeline — and matches the brief's deterministic-chain model; the
+extra LLM call's cost/latency is an explicit Phase 9 concern (D22), not a reason to add a knob now.
+**Graceful degradation was considered and rejected** (the alternative on the table): returning a 200
+with `test_file: null` when only test generation fails would keep the earlier stages' output, but it
+makes `test_file` nullable and lets a "complete-looking" 200 silently omit the file — a softer, less
+honest contract for no real gain at this stage. All-or-nothing instead reuses the existing
+`PipelineError`→500+stage handler unchanged and matches D30. The dependency seam keeps the HTTP suite
+key-less (D21). `test_file` is the obvious name beside `properties` and `strategy_plan`. Recorded in
+`PROJECT_BRIEF.md` §5 (the D5 "expose once real" rule), the second field that rule has added to the
+response after `strategy_plan`.

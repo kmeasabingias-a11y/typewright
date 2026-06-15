@@ -5,8 +5,9 @@
 > Where this file and the PDF differ, **this file wins**, and `DECISIONS.md` records
 > why. Keep this file current as the project evolves.
 >
-> **Status:** Phases 1–3 complete. Phase 4 (Test File Generation) in progress — Unit 1
-> (standalone `testgen.py`) done; `/v1/analyze` wiring (Unit 2) pending.
+> **Status:** Phases 1–4 complete. `/v1/analyze` runs the full parse → detect → generate
+> strategies → generate test file chain, returning a runnable pytest `test_file`. Next:
+> Phase 5 (Kestrel integration — run the generated tests in the sandbox).
 
 ## 1. The goal
 
@@ -99,18 +100,18 @@ Each step is one specific LLM call with structured output — not a free-form ag
 
 - **Phase 1 — Foundation.** ✅ Done. FastAPI service; `POST /v1/analyze` parses a function
   and returns AST metadata. *Exit: paste a function, get JSON with name/args/types/docstring.*
-- **Phase 2 — Property Detection.** ⏳ In progress. LLM detects property classes;
+- **Phase 2 — Property Detection.** ✅ Done. LLM detects property classes;
   `/v1/analyze` returns them alongside the AST; structured output + retry (Instructor); low
   temperature; few-shot prompt; golden set; tracing. *Exit: `/v1/analyze` returns detected
   properties (each with a testable relation + confidence) alongside the AST; detections look
   reasonable for known patterns; traces visible.* The golden set deliberately includes 2–3
   plain business-logic functions (the kind that would otherwise get only `totality`) to
   confirm `value_postcondition` catches them — closing the coverage gap inside Phase 2.
-- **Phase 3 — Strategy Generation.** Second LLM call: detected properties + types →
+- **Phase 3 — Strategy Generation.** ✅ Done. Second LLM call: detected properties + types →
   Hypothesis strategies. *Exit: strategies compile standalone and produce `@composite` code.*
-- **Phase 4 — Test File Generation.** Third LLM call → complete pytest file asserting the
-  relations. *Exit: generated files run under pytest (pass = clean, fail = bug) without
-  crashing at collection.*
+- **Phase 4 — Test File Generation.** ✅ Done. Third LLM call → complete, self-contained pytest
+  file asserting the relations; returned from `/v1/analyze` as `test_file`. *Exit: generated files
+  run under pytest (pass = clean, fail = bug) without crashing at collection.*
 - **Phase 5 — Kestrel Integration.** Build `kestrel-client` + a pytest/Hypothesis runtime
   image; run tests in the sandbox; parse counter-examples. *Exit: `/v1/analyze` returns
   bugs with failing inputs.*
@@ -165,6 +166,11 @@ of `economy` / `standard` / `premium` (unknown → standard). `include_fix_sugge
       { "argument": "v", "strategy": "st.text()", "rationale": "any string is valid input to a parser", "confidence": 0.7 }
     ],
     "extra_imports": []
+  },
+  "test_file": {
+    "source": "from hypothesis import given, strategies as st\nimport pytest\n\n\ndef parse_version(v): ...\n\n\n@given(v=st.text())\ndef test_round_trip(v): ...",
+    "test_names": ["test_round_trip"],
+    "skipped": []
   },
   "bugs_found": [ { "failing_input": "\"\"", "error": "IndexError", "violated_property": "...", "severity": "crash" } ],
   "fix_suggestion": { "code": "...", "verified": true, "tests_passed": 47, "tests_failed": 0 },

@@ -227,13 +227,15 @@ class AnalyzeRequest(BaseModel):
 class AnalyzeResponse(BaseModel):
     """Response of POST /v1/analyze.
 
-    Phase 3: the parsed ``function``, the ``properties`` it appears to satisfy (D23),
-    and the ``strategy_plan`` — a Hypothesis strategy per argument (D29, D30). The
-    later fields the spec promises (``bugs_found``, ``fix_suggestion``, ``metadata``)
-    appear only once their phases make them real (D5).
+    Phase 4: the parsed ``function``, the ``properties`` it appears to satisfy (D23),
+    the ``strategy_plan`` — a Hypothesis strategy per argument (D29, D30) — and the
+    ``test_file``: a complete, runnable pytest module asserting those properties (D33,
+    D36). The later fields the spec promises (``bugs_found``, ``fix_suggestion``,
+    ``metadata``) appear only once their phases make them real (D5).
     """
 
     analysis_id: str
     function: AnalyzedFunction
     properties: PropertyAnalysis
     strategy_plan: StrategyPlan
+    test_file: GeneratedTestFile

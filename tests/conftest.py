@@ -3,17 +3,24 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from typewright.main import create_app, get_generate_strategies, get_infer_properties
+from typewright.main import (
+    create_app,
+    get_generate_strategies,
+    get_generate_test_file,
+    get_infer_properties,
+)
 from typewright.models import (
     DetectedProperty,
     GeneratedStrategy,
+    GeneratedTestFile,
     PropertyAnalysis,
     PropertyClass,
     StrategyPlan,
 )
 
-# Fixed results the default fakes return, so API tests never hit a real LLM (both
-# the detection and generation steps are injected via dependencies — D21, D28).
+# Fixed results the default fakes return, so API tests never hit a real LLM (all three
+# steps — detection, generation, test generation — are injected via dependencies, D21,
+# D28, D36).
 SAMPLE_ANALYSIS = PropertyAnalysis(
     detected=[
         DetectedProperty(
@@ -39,6 +46,18 @@ SAMPLE_PLAN = StrategyPlan(
     extra_imports=[],
 )
 
+SAMPLE_TEST_FILE = GeneratedTestFile(
+    source=(
+        "from hypothesis import given, strategies as st\n"
+        "import pytest\n\n\n"
+        "def f(x):\n    return x\n\n\n"
+        "@given(x=st.text())\n"
+        "def test_idempotence(x):\n    assert f(f(x)) == f(x)\n"
+    ),
+    test_names=["test_idempotence"],
+    skipped=[],
+)
+
 
 def _default_infer(meta, *, model_tier=None) -> PropertyAnalysis:
     return SAMPLE_ANALYSIS
@@ -48,21 +67,27 @@ def _default_gen(meta, analysis, *, model_tier=None) -> StrategyPlan:
     return SAMPLE_PLAN
 
 
+def _default_testgen(meta, analysis, plan, *, model_tier=None) -> GeneratedTestFile:
+    return SAMPLE_TEST_FILE
+
+
 @pytest.fixture
 def make_client():
-    """Factory for a TestClient whose detection AND generation are mocked.
+    """Factory for a TestClient whose three LLM steps are all mocked.
 
-    Both LLM steps are injected via dependencies (D21, D28); overriding them lets
-    API tests run with no live key. Defaults return ``SAMPLE_ANALYSIS`` /
-    ``SAMPLE_PLAN``; pass a custom ``infer`` or ``gen`` to exercise tier selection
-    or pipeline failures.
+    Detection, generation, AND test generation are injected via dependencies (D21,
+    D28, D36); overriding them lets API tests run with no live key. Defaults return
+    ``SAMPLE_ANALYSIS`` / ``SAMPLE_PLAN`` / ``SAMPLE_TEST_FILE``; pass a custom
+    ``infer``, ``gen``, or ``gen_tests`` to exercise tier selection or pipeline
+    failures.
     """
     clients: list[TestClient] = []
 
-    def _make(infer=_default_infer, gen=_default_gen) -> TestClient:
+    def _make(infer=_default_infer, gen=_default_gen, gen_tests=_default_testgen) -> TestClient:
         app = create_app()
         app.dependency_overrides[get_infer_properties] = lambda: infer
         app.dependency_overrides[get_generate_strategies] = lambda: gen
+        app.dependency_overrides[get_generate_test_file] = lambda: gen_tests
         client = TestClient(app)
         clients.append(client)
         return client
@@ -74,7 +99,8 @@ def make_client():
 
 @pytest.fixture
 def client(make_client) -> TestClient:
-    """A TestClient with both LLM steps mocked (SAMPLE_ANALYSIS + SAMPLE_PLAN).
+    """A TestClient with all three LLM steps mocked (SAMPLE_ANALYSIS + SAMPLE_PLAN +
+    SAMPLE_TEST_FILE).
 
     Building the app per test (via the ``create_app()`` factory) keeps each test
     isolated from the others' state.

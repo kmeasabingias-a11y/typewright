@@ -9,7 +9,7 @@ key is needed.
 """
 
 from typewright.errors import PipelineError
-from typewright.models import PropertyAnalysis, StrategyPlan
+from typewright.models import GeneratedTestFile, PropertyAnalysis, StrategyPlan
 
 
 def test_health_returns_ok(client):
@@ -34,17 +34,24 @@ def test_analyze_returns_parsed_function(client):
 
 
 def test_analyze_returns_only_the_honest_subset(client):
-    """Phase 3 returns analysis_id + function + properties + strategy_plan — not bugs/fix yet."""
+    """Phase 4 returns analysis_id + function + properties + strategy_plan + test_file — not bugs/fix yet."""
     resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
 
     body = resp.json()
-    assert set(body.keys()) == {"analysis_id", "function", "properties", "strategy_plan"}
+    assert set(body.keys()) == {
+        "analysis_id",
+        "function",
+        "properties",
+        "strategy_plan",
+        "test_file",
+    }
     assert set(body["properties"].keys()) == {
         "detected",
         "input_types",
         "return_type",
     }
     assert set(body["strategy_plan"].keys()) == {"strategies", "extra_imports"}
+    assert set(body["test_file"].keys()) == {"source", "test_names", "skipped"}
     assert "bugs_found" not in body
     assert "fix_suggestion" not in body
 
@@ -136,6 +143,48 @@ def test_generation_failure_is_500_with_stage(make_client):
     body = resp.json()
     assert body["stage"] == "strategy_generation"
     assert "strategy_generation" in body["detail"]
+
+
+def test_analyze_includes_test_file(client):
+    """The mocked generated test file is surfaced in the response."""
+    resp = client.post("/v1/analyze", json={"code": "def f(x):\n    return x"})
+
+    assert resp.status_code == 200
+    test_file = resp.json()["test_file"]
+    assert "def test_idempotence" in test_file["source"]
+    assert test_file["test_names"] == ["test_idempotence"]
+
+
+def test_model_tier_is_passed_to_testgen(make_client):
+    """The request's model_tier reaches the test-generation step verbatim."""
+    seen = {}
+
+    def gen_tests(meta, analysis, plan, *, model_tier=None):
+        seen["tier"] = model_tier
+        return GeneratedTestFile(source="")
+
+    client = make_client(gen_tests=gen_tests)
+    resp = client.post(
+        "/v1/analyze", json={"code": "def f():\n    pass", "model_tier": "premium"}
+    )
+
+    assert resp.status_code == 200
+    assert seen["tier"] == "premium"
+
+
+def test_testgen_failure_is_500_with_stage(make_client):
+    """A PipelineError from test generation becomes a 500 naming the failing stage (D15, D36)."""
+
+    def gen_tests(meta, analysis, plan, *, model_tier=None):
+        raise PipelineError("test_generation", "model unavailable")
+
+    client = make_client(gen_tests=gen_tests)
+    resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
+
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["stage"] == "test_generation"
+    assert "test_generation" in body["detail"]
 
 # --- Caller errors map to 400 (the TypeWrightError family) ------------------
 
