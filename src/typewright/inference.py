@@ -10,10 +10,9 @@ phases.
 The model's job is RECOGNITION, not spec synthesis: it reasons from the name,
 signature, type hints, and docstring and prefers recognized classes over invented
 per-function specs, signalling uncertainty with low confidence rather than
-fabricating (D23). The call goes through LiteLLM (D17), wrapped by Instructor so
-the reply is coerced into ``PropertyDetection`` with reask retries (D13), at low
-temperature (D25). Any failure of this stage becomes a ``PipelineError`` (stage
-"property_detection", D15) -> HTTP 500.
+fabricating (D23). The structured call goes through the shared ``complete`` helper
+(D27/D31), which wraps Instructor + LiteLLM at low temperature (D25) and turns any
+failure into a ``PipelineError`` (stage "property_detection", D15) -> HTTP 500.
 """
 
 from __future__ import annotations
@@ -21,8 +20,7 @@ from __future__ import annotations
 import instructor
 
 from .config import Settings, get_settings
-from .errors import PipelineError
-from .llm import build_client
+from .llm import build_client, complete
 from .models import FunctionMetadata, PropertyAnalysis, PropertyDetection
 
 _STAGE = "property_detection"
@@ -94,7 +92,8 @@ def _client() -> instructor.Instructor:
     """Build the Instructor-wrapped LiteLLM client.
 
     Factored out so tests can monkeypatch it with a fake that returns a known
-    ``PropertyDetection`` instead of calling a real model.
+    ``PropertyDetection`` instead of calling a real model. Passed to ``complete``
+    (D31), which preserves this seam.
     """
     return build_client()
 
@@ -114,9 +113,6 @@ def infer_properties(
     settings = settings or get_settings()
     model = settings.model_for_tier(model_tier or settings.default_model_tier)
 
-    if not settings.anthropic_api_key:
-        raise PipelineError(_STAGE, "no LLM API key configured")
-
     user_prompt = (
         "Detect the property classes for this function.\n\n"
         f"Signature: {meta.signature}\n"
@@ -124,24 +120,17 @@ def infer_properties(
         f"Source:\n{meta.source}"
     )
 
-    try:
-        detection = _client().chat.completions.create(
-            model=model,
-            response_model=PropertyDetection,
-            api_key=settings.anthropic_api_key,
-            max_retries=settings.llm_max_retries,
-            max_tokens=settings.llm_max_tokens,
-            temperature=settings.llm_temperature,
-            timeout=settings.llm_timeout_seconds,
-            messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT + "\n\n" + _FEW_SHOT},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-    except PipelineError:
-        raise
-    except Exception as exc:  # noqa: BLE001 — any LLM/transport failure becomes a 500
-        raise PipelineError(_STAGE, str(exc)) from exc
+    detection = complete(
+        _client,
+        stage=_STAGE,
+        settings=settings,
+        model=model,
+        response_model=PropertyDetection,
+        messages=[
+            {"role": "system", "content": _SYSTEM_PROMPT + "\n\n" + _FEW_SHOT},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
 
     return PropertyAnalysis(
         detected=detection.properties,

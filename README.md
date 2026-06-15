@@ -19,8 +19,8 @@ spec, kept for the record; where they differ, `PROJECT_BRIEF.md` wins.)
 
 ## Prior art
 
-TypeWright productizes the LLM-driven property-based testing technique published by
-Anthropic in *Agentic Property-Based Testing* (arXiv:2510.09907, Oct 2025). It is a
+TypeWright productizes the LLM-driven property-based testing technique published
+in *Agentic Property-Based Testing* (arXiv:2510.09907, Oct 2025). It is a
 deliberate productization in a new form factor (GitHub App + web demo), not novel
 research. See `ACKNOWLEDGMENTS.md` (added at launch) for full attribution.
 

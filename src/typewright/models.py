@@ -136,6 +136,50 @@ class StrategyPlan(BaseModel):
     extra_imports: list[str] = Field(default_factory=list)
 
 
+class GeneratedTests(BaseModel):
+    """The LLM's raw Phase 4 output (hybrid assembly, D32): the per-property test
+    functions it wrote, the extra imports they need, and any property it could not make
+    executable.
+
+    Only the test functions come from the model; ``testgen.py`` assembles the final file
+    around them (import header + the verbatim function under test). Each ``test_functions``
+    item is a complete ``@given``-decorated function as source code.
+    """
+
+    test_functions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Each item is a complete @given-decorated pytest function as source code, "
+            "asserting ONE detected relation. Do NOT include the function under test or "
+            "the hypothesis/pytest imports."
+        ),
+    )
+    extra_imports: list[str] = Field(
+        default_factory=list,
+        description="Imports the TESTS need beyond hypothesis/pytest, e.g. 'import math'.",
+    )
+    skipped: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Properties left untested and why, e.g. "
+            "'round_trip: companion from_base64 not in the snippet'."
+        ),
+    )
+
+
+class GeneratedTestFile(BaseModel):
+    """Phase 4 result (D33/D35): a self-contained, syntactically-valid pytest module.
+
+    ``source`` is the complete file (imports + the function under test + the @given tests)
+    that runs under pytest as-is. ``test_names`` are read off the parsed AST (not trusted
+    from the LLM). ``skipped`` records properties left untested and why — e.g. a round-trip
+    whose inverse is not in the snippet (PROJECT_BRIEF §8 risk 3).
+    """
+    source: str
+    test_names: list[str] = Field(default_factory=list)
+    skipped: list[str] = Field(default_factory=list)
+
+
 class AnalyzedFunction(BaseModel):
     """The lean, API-facing view of a parsed function."""
 

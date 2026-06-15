@@ -5,7 +5,8 @@
 > Where this file and the PDF differ, **this file wins**, and `DECISIONS.md` records
 > why. Keep this file current as the project evolves.
 >
-> **Status:** Phase 2 (Property Detection) in progress. Phase 1 complete.
+> **Status:** Phases 1–3 complete. Phase 4 (Test File Generation) in progress — Unit 1
+> (standalone `testgen.py`) done; `/v1/analyze` wiring (Unit 2) pending.
 
 ## 1. The goal
 
@@ -79,9 +80,15 @@ Each step is one specific LLM call with structured output — not a free-form ag
   input types → Hypothesis strategies as Python code, validated with `ast.parse()` before
   acceptance; retried on parse failure.
 - **Step 4 — Test generation (LLM call #3).** Consumes strategies + the testable relations
-  → a complete pytest file whose `@given` tests ASSERT each relation (round-trip equality,
-  idempotence, invariants, metamorphic relations, type postconditions, no-crash). Validated
-  via `ast.parse()` + dry-run import.
+  → a complete, self-contained pytest file whose `@given` tests ASSERT each relation
+  (round-trip equality, idempotence, invariants, metamorphic relations, type postconditions,
+  no-crash). **Hybrid assembly (D32/D33):** the LLM writes only the test functions; TypeWright
+  deterministically prepends the import header + the verbatim function under test, so the file
+  runs under pytest standalone. **Validated with `ast.parse()` in TypeWright (D34)** — a static
+  gate only; the **dry-run import / execution happens in the Kestrel sandbox (Step 5)**, never
+  in the API process, since running generated code in-process would breach the isolation boundary
+  (§2). A property whose round-trip companion is absent is recorded as skipped, not forced into an
+  unrunnable test (§8 risk 3).
 - **Step 5 — Execution (Kestrel, no LLM).** Combined file (function + tests) runs in the
   sandbox; returns outcomes, stdout/stderr, and Hypothesis counter-examples.
 - **Step 6 — Result parsing (no LLM).** Extract which tests failed and on what inputs.
@@ -181,8 +188,9 @@ includes the failing `stage`) · 504 (exceeded `max_test_runtime_seconds`).
 Python 3.11+ · FastAPI · **LiteLLM** (model gateway) · **Pydantic + Instructor**
 (structured output + retry) · stdlib `ast` · **Hypothesis** + **pytest** (generated into
 output) · **Kestrel** (sandbox) · PostgreSQL + Redis (added when a feature needs them) ·
-Langfuse (tracing) · Next.js or HTML+HTMX (demo). Tooling: `uv`. Models: Anthropic via
-LiteLLM, tiered economy/standard/premium (Haiku 4.5 / Sonnet 4.6 / Opus 4.8).
+Langfuse (tracing) · Next.js or HTML+HTMX (demo). Tooling: `uv`. Models: served through
+**LiteLLM** (the model gateway), tiered economy / standard / premium; the concrete model ID
+behind each tier is configured in `config.py`.
 
 ## 7. Deviations from the original PDF brief
 

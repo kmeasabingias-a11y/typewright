@@ -4,9 +4,9 @@
 ``PropertyAnalysis`` and returns a ``StrategyPlan``: one Hypothesis strategy per argument
 (plus any extra imports) that a later phase drops straight into ``@given(...)`` (D24/D29).
 
-Mirrors ``inference.py``: one structured Instructor call (D19) through the shared client
-(D27), at low temperature with few-shot (D25). Any failure becomes a ``PipelineError``
-(stage "strategy_generation", D15) -> HTTP 500.
+Mirrors ``inference.py``: one structured Instructor call (D19) through the shared
+``complete`` helper (D27/D31), at low temperature with few-shot (D25). Any failure becomes a
+``PipelineError`` (stage "strategy_generation", D15) -> HTTP 500.
 """
 
 from __future__ import annotations
@@ -14,8 +14,7 @@ from __future__ import annotations
 import instructor
 
 from .config import Settings, get_settings
-from .errors import PipelineError
-from .llm import build_client
+from .llm import build_client, complete
 from .models import FunctionMetadata, PropertyAnalysis, StrategyPlan
 
 _STAGE = "strategy_generation"
@@ -61,17 +60,18 @@ def _client() -> instructor.Instructor:
     """Build the Instructor-wrapped LiteLLM client.
 
     Factored out so tests can monkeypatch it with a fake that returns a known
-    ``StrategyPlan`` instead of calling a real model.
+    ``StrategyPlan`` instead of calling a real model. Passed to ``complete`` (D31),
+    which preserves this seam.
     """
     return build_client()
 
 
 def generate_strategies(
-        meta: FunctionMetadata,
-        analysis: PropertyAnalysis,
-        settings: Settings | None = None,
-        *,
-        model_tier: str | None = None,
+    meta: FunctionMetadata,
+    analysis: PropertyAnalysis,
+    settings: Settings | None = None,
+    *,
+    model_tier: str | None = None,
 ) -> StrategyPlan:
     """Generate a Hypothesis strategy per argument for one analyzed function.
 
@@ -81,9 +81,6 @@ def generate_strategies(
     settings = settings or get_settings()
     model = settings.model_for_tier(model_tier or settings.default_model_tier)
 
-    if not settings.anthropic_api_key:
-        raise PipelineError(_STAGE, "no LLM API key configured")
-    
     detected = ";".join(
         f"{p.property_class.value} [{p.relation}]" for p in analysis.detected
     ) or "(none)"
@@ -100,21 +97,14 @@ def generate_strategies(
         f"Detected properties: {detected}\n"
     )
 
-    try:
-        return _client().chat.completions.create(
-            model=model,
-            response_model=StrategyPlan,
-            api_key=settings.anthropic_api_key,
-            max_retries=settings.llm_max_retries,
-            max_tokens=settings.llm_max_tokens,
-            temperature=settings.llm_temperature,
-            timeout=settings.llm_timeout_seconds,
-            messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT + "\n\n" + _FEW_SHOT},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-    except PipelineError:
-        raise
-    except Exception as exc:    # noqa : BLE001 - any LLM/transport failure becomes a 500
-        raise PipelineError(_STAGE, str(exc)) from exc
+    return complete(
+        _client,
+        stage=_STAGE,
+        settings=settings,
+        model=model,
+        response_model=StrategyPlan,
+        messages=[
+            {"role": "system", "content": _SYSTEM_PROMPT + "\n\n" + _FEW_SHOT},
+            {"role": "user", "content": user_prompt},
+        ],
+    )

@@ -130,8 +130,8 @@ the model behind each tier (or the provider itself) changes in one place. LiteLL
 call shape across providers/models, so swapping a backend is a config change, not a code
 change, and the `anthropic/` prefix is just how LiteLLM routes. Falling back to `standard`
 means a stale or mistyped tier degrades gracefully rather than erroring. Trade-off: LiteLLM
-sits a layer above any single provider's SDK, so provider-specific features (e.g. Anthropic
-prompt caching, adaptive-thinking controls) aren't first-class — revisit for the hot path if a
+sits a layer above any single provider's SDK, so provider-specific features (e.g. prompt
+caching, adaptive-thinking controls) aren't first-class — revisit for the hot path if a
 later phase needs them. Model IDs verified against the current catalog (Haiku 4.5 / Sonnet 4.6
 / Opus 4.8); the bare aliases are correct and must **not** carry date suffixes.
 
@@ -296,3 +296,76 @@ reads cleanly beside `properties` (whose inner field is `detected`). This field 
 brief's §5 response (strategies had been left as an internal artifact); exposing it is a small,
 deliberate extension recorded in `PROJECT_BRIEF.md` §5, consistent with the D5 "expose once real"
 rule.
+
+## Phase 4 — Test File Generation
+
+### D31 — Test generation lives in a new `testgen.py`; the shared LLM *call shape* hoists into `llm.py`
+**Decision:** Phase 4's test-file generation is a new module `testgen.py` (`generate_test_file`),
+mirroring the module-per-step pattern (D27). With this *third* LLM caller, the call shape that the
+three steps repeated verbatim — the `create(...)` kwargs plus the `PipelineError` wrapping — is
+hoisted into a shared `llm.complete(client_factory, *, stage, settings, model, response_model,
+messages)`. `inference.py`, `generation.py`, and `testgen.py` each keep their thin module-level
+`_client()` and **pass it (uncalled) into `complete()`**, which does the API-key check first, then
+the call, then wraps any failure as `PipelineError(stage, …)`.
+**Why:** D27 explicitly named "a third caller (Phase 4 test-gen)" as the trigger to hoist the call
+shape "once the pattern is proven" — this is that caller, and three copies is the rule-of-three
+point to deduplicate. Passing each module's `_client` factory into `complete()` **preserves the
+per-module test seam**: every existing test that monkeypatches `inference._client` /
+`generation._client` still controls the client, so the Phase 2/3 suites stayed green untouched.
+The key-check runs before building the client (the same order as before the hoist), and
+`max_retries`/`max_tokens`/`temperature`/`timeout` are read from `settings` since all callers used
+identical values.
+
+### D32 — Hybrid assembly: the LLM writes only the test functions; `testgen.py` assembles the file
+**Decision:** The LLM returns just the per-property `@given` test functions (a `GeneratedTests`);
+`testgen.py` then **deterministically assembles** the final file = import header + extra imports +
+the function under test + the LLM's tests. The model never emits the imports or re-emits the
+function. Chosen over "LLM emits the whole file as one string."
+**Why:** This puts the parts that *must* be right (the import header, the verbatim function under
+test) under our control and asks the model only for the genuinely creative bit — turning each
+`relation` into a `@given` assertion. It is the same "merge in deterministic facts" philosophy as
+`infer_properties` (D24), and it removes the worst failure mode of whole-file generation: the model
+re-stating a **drifted or hallucinated** function body, so the tests would run against the wrong
+code. Imports are order-preserving deduped (base → strategy `extra_imports` → test `extra_imports`)
+so a module needed by both a strategy and a test appears once.
+
+### D33 — Output is a self-contained file: prepend the function source so it runs under pytest now
+**Decision:** The generated file is **self-contained** — `testgen.py` prepends the function's own
+source (`meta.source`, which the parser already holds) ahead of the tests — rather than a test-only
+file that imports the function from elsewhere.
+**Why:** The Phase 4 exit criterion is "generated files run under pytest without crashing at
+collection." A self-contained file satisfies that *today*, standalone, and matches the brief's
+"combined file (function + tests)" execution model (§3 Step 5). Because we already own the exact
+function source, prepending it deterministically is strictly safer than asking the model to
+reproduce it (see D32). The companion problem for round-trip — when the inverse isn't in the
+snippet — is handled by `skipped`, not by importing a function that may not exist (PROJECT_BRIEF §8
+risk 3).
+
+### D34 — Validate with `ast.parse()` only, in-process; defer dry-run import/execution to Kestrel
+**Decision:** Phase 4's only validation gate is a static `ast.parse()` of the assembled file; a file
+that doesn't parse raises `PipelineError("test_generation", …)` → 500. We deliberately do **not**
+import or execute the generated code inside the TypeWright process. The brief's "ast.parse +
+**dry-run import**" is split: `ast.parse` here, real import/execution in the Kestrel sandbox
+(Phase 5).
+**Why:** Importing generated code runs it, and running untrusted generated code in-process is exactly
+the risk Kestrel exists to contain — doing it in the API process would undo the architecture's core
+safety boundary (§2). `ast.parse` is a cheap, deterministic, side-effect-free check that catches the
+realistic failure (a malformed test function) and meets the exit criterion ("doesn't crash at
+collection") without executing anything. This refines, not contradicts, the brief — recorded in
+`PROJECT_BRIEF.md` §3 Step 4.
+
+### D35 — Two models (`GeneratedTests` raw → `GeneratedTestFile`); test names off the AST; Unit 1 standalone
+**Decision:** The LLM's `response_model` is `GeneratedTests` (`test_functions`, `extra_imports`,
+`skipped`); `generate_test_file` returns `GeneratedTestFile` (`source`, `test_names`, `skipped`).
+`test_names` are read off the **parsed AST** (top-level `def test_*`), not trusted from the model.
+A property the model can't make executable (e.g. round-trip with an absent companion) goes into
+`skipped` with a reason. Per the D20/D28 cadence, Unit 1 ships the standalone module + mocked tests
+only; wiring `/v1/analyze` (response gains `test_file`) is a following unit.
+**Why:** Splitting the raw LLM output from the returned artifact keeps the hybrid-assembly seam
+clean (D32) — the model owns the tests, `testgen.py` owns the file. Reading `test_names` from the AST
+makes them a *fact about the assembled file* rather than a claim the model could get wrong. `skipped`
+keeps the result honest about what wasn't covered (PROJECT_BRIEF §8 risk 3) instead of silently
+dropping properties. Standalone-first matches every prior phase (D20, D28): small, independently
+shippable, suite stays fast and key-less; the response shape changes only when the wiring unit makes
+`test_file` real (the D5 honesty rule), so the public API and `PROJECT_BRIEF.md` §5 are untouched by
+this unit.
