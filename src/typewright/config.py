@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     # TYPEWRIGHT_KESTREL_BASE_URL / TYPEWRIGHT_KESTREL_API_KEY (D37).
     kestrel_base_url: str = "http://localhost:8000"
     kestrel_api_key: str | None = None
+    # Default per-run sandbox budget (seconds). A request's max_test_runtime_seconds
+    # overrides it; Kestrel additionally clamps any value down to its own ceiling (D41).
+    kestrel_timeout_seconds: float = 30.0
     # The httpx read timeout is the run budget + this margin, so the HTTP call outlives
     # a legitimately long sandbox run instead of aborting it client-side.
     kestrel_http_timeout_buffer_seconds: float = 15.0

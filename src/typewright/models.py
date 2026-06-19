@@ -257,9 +257,17 @@ class AnalyzeRequest(BaseModel):
         description=(
             "Model tier for property detection: 'economy', 'standard', or "
             "'premium'. Optional; falls back to the configured default, and an "
-            "unknown tier degrades to 'standard' (D17). Other spec'd request "
-            "fields (include_fix_suggestion, max_test_runtime_seconds) arrive "
-            "with the phases that use them (D22)."
+            "unknown tier degrades to 'standard' (D17). The other spec'd request "
+            "field include_fix_suggestion arrives with the phase that uses it (D22)."
+        ),
+    )
+    max_test_runtime_seconds: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Per-run sandbox time budget in seconds for executing the generated tests "
+            "(Phase 5). Optional; falls back to the configured default, and Kestrel "
+            "clamps any value down to its own ceiling (D41)."
         ),
     )
 
@@ -267,11 +275,11 @@ class AnalyzeRequest(BaseModel):
 class AnalyzeResponse(BaseModel):
     """Response of POST /v1/analyze.
 
-    Phase 4: the parsed ``function``, the ``properties`` it appears to satisfy (D23),
-    the ``strategy_plan`` — a Hypothesis strategy per argument (D29, D30) — and the
-    ``test_file``: a complete, runnable pytest module asserting those properties (D33,
-    D36). The later fields the spec promises (``bugs_found``, ``fix_suggestion``,
-    ``metadata``) appear only once their phases make them real (D5).
+    Phase 5: the parsed ``function``, the ``properties`` it appears to satisfy (D23), the
+    ``strategy_plan`` (D29, D30), the ``test_file`` (D33, D36), and ``bugs_found`` — the
+    failing inputs discovered by running that test file in the Kestrel sandbox (D40, D41);
+    the list is empty when every property held. ``fix_suggestion`` and ``metadata`` appear
+    only once their phases make them real (D5).
     """
 
     analysis_id: str
@@ -279,3 +287,4 @@ class AnalyzeResponse(BaseModel):
     properties: PropertyAnalysis
     strategy_plan: StrategyPlan
     test_file: GeneratedTestFile
+    bugs_found: list[Bug] = Field(default_factory=list)

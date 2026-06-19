@@ -5,9 +5,10 @@
 > Where this file and the PDF differ, **this file wins**, and `DECISIONS.md` records
 > why. Keep this file current as the project evolves.
 >
-> **Status:** Phases 1–4 complete. `/v1/analyze` runs the full parse → detect → generate
-> strategies → generate test file chain, returning a runnable pytest `test_file`. Next:
-> Phase 5 (Kestrel integration — run the generated tests in the sandbox).
+> **Status:** Phases 1–4 complete; Phase 5 (Kestrel integration) wired. `/v1/analyze` runs
+> the full parse → detect → generate strategies → generate test file → run-in-sandbox chain,
+> returning `bugs_found` (the failing inputs from running the generated tests in Kestrel).
+> Remaining for Phase 5: the custom pytest/Hypothesis runtime image and a live end-to-end smoke.
 
 ## 1. The goal
 
@@ -112,9 +113,11 @@ Each step is one specific LLM call with structured output — not a free-form ag
 - **Phase 4 — Test File Generation.** ✅ Done. Third LLM call → complete, self-contained pytest
   file asserting the relations; returned from `/v1/analyze` as `test_file`. *Exit: generated files
   run under pytest (pass = clean, fail = bug) without crashing at collection.*
-- **Phase 5 — Kestrel Integration.** Build `kestrel-client` + a pytest/Hypothesis runtime
-  image; run tests in the sandbox; parse counter-examples. *Exit: `/v1/analyze` returns
-  bugs with failing inputs.*
+- **Phase 5 — Kestrel Integration.** 🔄 Wired. Thin `kestrel.py` `/execute` client (D37) +
+  sandbox execution (D38) + result parsing (D39/D40); `/v1/analyze` runs the generated tests
+  in the sandbox and returns `bugs_found` (D41), with a 504 for timed-out runs (D42).
+  Remaining: the custom pytest/Hypothesis runtime image and a live end-to-end smoke.
+  *Exit: `/v1/analyze` returns bugs with failing inputs.*
 - **Phase 6 — Fix Suggestions.** Fourth LLM call; verify the fix re-runs green, else "no
   confident fix." *Exit: a verified fix for ~60%+ of detected bugs on the golden set.*
 - **Phase 7 — GitHub App.** Webhook → background queue → diff → per-function analysis →
@@ -140,8 +143,9 @@ Each step is one specific LLM call with structured output — not a free-form ag
 }
 ```
 `function_name` optional (inferred when the source has one function). `model_tier` is one
-of `economy` / `standard` / `premium` (unknown → standard). `include_fix_suggestion` and
-`max_test_runtime_seconds` arrive with the phases that use them (Phases 6 / 5).
+of `economy` / `standard` / `premium` (unknown → standard). `max_test_runtime_seconds` is
+the per-run sandbox budget in seconds (Phase 5; falls back to the configured default, and
+Kestrel clamps it to its own ceiling). `include_fix_suggestion` arrives with Phase 6.
 
 **Response** (fields appear only once their phase makes them real — D5)
 ```json
@@ -172,7 +176,7 @@ of `economy` / `standard` / `premium` (unknown → standard). `include_fix_sugge
     "test_names": ["test_round_trip"],
     "skipped": []
   },
-  "bugs_found": [ { "failing_input": "\"\"", "error": "IndexError", "violated_property": "...", "severity": "crash" } ],
+  "bugs_found": [ { "test_name": "test_totality", "failing_input": "v=''", "error": "IndexError", "violated_property": "first_char(v) does not raise", "severity": "crash" } ],
   "fix_suggestion": { "code": "...", "verified": true, "tests_passed": 47, "tests_failed": 0 },
   "metadata": { "analysis_duration_ms": 0, "llm_cost_usd": 0.0, "tests_generated": 0, "tests_run": 0, "hypothesis_examples_tried": 0 }
 }

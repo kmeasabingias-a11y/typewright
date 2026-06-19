@@ -3,11 +3,13 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from typewright.kestrel import SandboxResult
 from typewright.main import (
     create_app,
     get_generate_strategies,
     get_generate_test_file,
     get_infer_properties,
+    get_run_tests,
 )
 from typewright.models import (
     DetectedProperty,
@@ -18,9 +20,9 @@ from typewright.models import (
     StrategyPlan,
 )
 
-# Fixed results the default fakes return, so API tests never hit a real LLM (all three
-# steps — detection, generation, test generation — are injected via dependencies, D21,
-# D28, D36).
+# Fixed results the default fakes return, so API tests never hit a real LLM or a live
+# Kestrel (all four steps — detection, generation, test generation, sandbox execution —
+# are injected via dependencies, D21, D28, D36, D41).
 SAMPLE_ANALYSIS = PropertyAnalysis(
     detected=[
         DetectedProperty(
@@ -58,6 +60,15 @@ SAMPLE_TEST_FILE = GeneratedTestFile(
     skipped=[],
 )
 
+# Default sandbox outcome: a clean run (all tests passed) -> no bugs.
+SAMPLE_SANDBOX_RESULT = SandboxResult(
+    stdout="1 passed in 0.05s",
+    stderr="",
+    exit_code=0,
+    duration_ms=12,
+    timed_out=False,
+)
+
 
 def _default_infer(meta, *, model_tier=None) -> PropertyAnalysis:
     return SAMPLE_ANALYSIS
@@ -71,23 +82,33 @@ def _default_testgen(meta, analysis, plan, *, model_tier=None) -> GeneratedTestF
     return SAMPLE_TEST_FILE
 
 
+def _default_run(test_file, *, timeout_seconds, settings=None) -> SandboxResult:
+    return SAMPLE_SANDBOX_RESULT
+
+
 @pytest.fixture
 def make_client():
-    """Factory for a TestClient whose three LLM steps are all mocked.
+    """Factory for a TestClient whose four pipeline steps are all mocked.
 
-    Detection, generation, AND test generation are injected via dependencies (D21,
-    D28, D36); overriding them lets API tests run with no live key. Defaults return
-    ``SAMPLE_ANALYSIS`` / ``SAMPLE_PLAN`` / ``SAMPLE_TEST_FILE``; pass a custom
-    ``infer``, ``gen``, or ``gen_tests`` to exercise tier selection or pipeline
-    failures.
+    Detection, generation, test generation, AND sandbox execution are injected via
+    dependencies (D21, D28, D36, D41); overriding them lets API tests run with no live key
+    and no live Kestrel. Defaults return SAMPLE_ANALYSIS / SAMPLE_PLAN / SAMPLE_TEST_FILE /
+    SAMPLE_SANDBOX_RESULT; pass a custom ``infer``, ``gen``, ``gen_tests``, or ``run`` to
+    exercise tier selection, bug surfacing, timeouts, or pipeline failures.
     """
     clients: list[TestClient] = []
 
-    def _make(infer=_default_infer, gen=_default_gen, gen_tests=_default_testgen) -> TestClient:
+    def _make(
+        infer=_default_infer,
+        gen=_default_gen,
+        gen_tests=_default_testgen,
+        run=_default_run,
+    ) -> TestClient:
         app = create_app()
         app.dependency_overrides[get_infer_properties] = lambda: infer
         app.dependency_overrides[get_generate_strategies] = lambda: gen
         app.dependency_overrides[get_generate_test_file] = lambda: gen_tests
+        app.dependency_overrides[get_run_tests] = lambda: run
         client = TestClient(app)
         clients.append(client)
         return client
@@ -99,10 +120,5 @@ def make_client():
 
 @pytest.fixture
 def client(make_client) -> TestClient:
-    """A TestClient with all three LLM steps mocked (SAMPLE_ANALYSIS + SAMPLE_PLAN +
-    SAMPLE_TEST_FILE).
-
-    Building the app per test (via the ``create_app()`` factory) keeps each test
-    isolated from the others' state.
-    """
+    """A TestClient with all four pipeline steps mocked (no live key, no live Kestrel)."""
     return make_client()

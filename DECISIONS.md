@@ -483,3 +483,39 @@ counts, truncation) are what Unit 3 needs to choose 504 and fill the brief's fut
 second pass over the output. Per the standalone-first cadence (D20/D28/D35) this unit adds the models and
 parser only; `AnalyzeResponse` and `PROJECT_BRIEF.md` §5 stay untouched until Unit 3 makes `bugs_found`
 real.
+
+### D41 — `/v1/analyze` runs the tests in the sandbox; response gains `bugs_found`; seam at the I/O boundary (Phase 5, Unit 3)
+**Decision:** The endpoint now runs the full chain parse → detect properties → generate strategies →
+generate test file → **run in the sandbox**, returning `{ analysis_id, function, properties, strategy_plan,
+test_file, bugs_found }`. The sandbox step is reached through a fourth `get_run_tests` FastAPI dependency
+(mirroring `get_infer_properties`/`get_generate_strategies`/`get_generate_test_file`, D21/D30/D36) — but
+the seam sits at the **I/O boundary only**: it injects `execution.run_tests` (which calls Kestrel and
+returns a raw `SandboxResult`), and the route then calls the *pure* `results.parse_results` itself. The
+request gains `max_test_runtime_seconds` (optional; the route resolves the budget as the request value or
+`settings.kestrel_timeout_seconds`, the new config default); `bugs_found` is `list[Bug]` (empty when every
+property held). Failure handling stays **all-or-nothing**: a `PipelineError` from any LLM stage or the
+sandbox call → 500 naming the stage (D15/D37).
+**Why:** Mocking only the external call and running the real parser through the API means the HTTP suite
+verifies that wiring + parsing actually agree end-to-end — a combined `find_bugs` seam (run + parse behind
+one injectable) was considered and rejected because it would mock the parser away, so API tests could never
+catch a wiring/parsing mismatch and parsing would need separate coverage. It also matches the codebase
+principle that seams exist for I/O, not pure functions (`parse_results` is deterministic and side-effect-free,
+so it needs no seam). Always-on keeps the contract simple ("analyze" means the whole pipeline, through
+execution) and matches D30/D36. `bugs_found` is the brief's documented field, now made real per the D5
+"expose once real" rule — the third field that rule has added to the response after `strategy_plan` and
+`test_file`. (Deferred: a Kestrel `429`/`Retry-After` currently folds into the 500; the 100,000-char `code`
+cap can 422 a pathological file — both noted for Phase 9 hardening.)
+
+### D42 — A timed-out sandbox run returns 504 via `SandboxTimeoutError`, not a 200 (Phase 5, Unit 3)
+**Decision:** When the `SandboxResult` comes back with `timed_out=True` (the tests exceeded the budget;
+Kestrel killed the run and returned it as data, D37), the route raises a new `SandboxTimeoutError`, which a
+dedicated handler maps to **504** with the budget in the detail. `SandboxTimeoutError` is deliberately
+neither a `TypeWrightError` (the caller's input was valid) nor a `PipelineError` (no stage *failed* — the
+tests ran, they just didn't finish), so it gets its own type + handler rather than folding into the 400/500
+families.
+**Why:** The alternative considered — return 200 with an empty `bugs_found` — was rejected because a
+timed-out run carries *no information* about whether the function is correct, yet would read identically to
+"analyzed cleanly, no bugs found." For a tool whose entire value is *trustworthy* bug reports, that false
+all-clear is the worst possible failure mode. 504 is also exactly what PROJECT_BRIEF §7.1 specifies for an
+exceeded `max_test_runtime_seconds`. The distinct exception type keeps the status-code mapping a single
+`isinstance`/handler dispatch at the edge, consistent with the D8/D15 error-to-status design.

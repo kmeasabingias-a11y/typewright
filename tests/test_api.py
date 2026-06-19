@@ -10,6 +10,7 @@ key is needed.
 
 from typewright.errors import PipelineError
 from typewright.models import GeneratedTestFile, PropertyAnalysis, StrategyPlan
+from typewright.kestrel import SandboxResult
 
 
 def test_health_returns_ok(client):
@@ -34,7 +35,7 @@ def test_analyze_returns_parsed_function(client):
 
 
 def test_analyze_returns_only_the_honest_subset(client):
-    """Phase 4 returns analysis_id + function + properties + strategy_plan + test_file — not bugs/fix yet."""
+    """Phase 5 returns analysis_id + function + properties + strategy_plan + test_file + bugs_found — not fix yet."""
     resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
 
     body = resp.json()
@@ -44,6 +45,7 @@ def test_analyze_returns_only_the_honest_subset(client):
         "properties",
         "strategy_plan",
         "test_file",
+        "bugs_found",
     }
     assert set(body["properties"].keys()) == {
         "detected",
@@ -52,7 +54,6 @@ def test_analyze_returns_only_the_honest_subset(client):
     }
     assert set(body["strategy_plan"].keys()) == {"strategies", "extra_imports"}
     assert set(body["test_file"].keys()) == {"source", "test_names", "skipped"}
-    assert "bugs_found" not in body
     assert "fix_suggestion" not in body
 
 
@@ -185,6 +186,88 @@ def test_testgen_failure_is_500_with_stage(make_client):
     body = resp.json()
     assert body["stage"] == "test_generation"
     assert "test_generation" in body["detail"]
+
+
+def test_analyze_includes_bugs_found(client):
+    """A clean sandbox run (default fake) surfaces an empty bugs_found list (Phase 5, D41)."""
+    resp = client.post("/v1/analyze", json={"code": "def f(x):\n    return x"})
+
+    assert resp.status_code == 200
+    assert resp.json()["bugs_found"] == []
+
+
+def test_bugs_found_surfaces_sandbox_failures(make_client):
+    """A failing run is parsed into structured bugs in the response (D40, D41)."""
+    failing = SandboxResult(
+        stdout=(
+            "F\n"
+            "Falsifying example: test_idempotence(x='A')\n"
+            "FAILED main.py::test_idempotence - assert 'AA' == 'A'\n"
+            "1 failed in 0.10s\n"
+        ),
+        stderr="",
+        exit_code=1,
+        duration_ms=30,
+        timed_out=False,
+    )
+
+    client = make_client(run=lambda test_file, *, timeout_seconds, settings=None: failing)
+    resp = client.post("/v1/analyze", json={"code": "def f(x):\n    return x"})
+
+    assert resp.status_code == 200
+    bugs = resp.json()["bugs_found"]
+    assert len(bugs) == 1
+    assert bugs[0]["test_name"] == "test_idempotence"
+    assert bugs[0]["failing_input"] == "x='A'"
+    assert bugs[0]["severity"] == "property_violation"
+    assert bugs[0]["violated_property"] == "f(f(x)) == f(x)"  # mapped from SAMPLE_ANALYSIS
+
+
+def test_max_test_runtime_seconds_passed_through(make_client):
+    """The request's max_test_runtime_seconds reaches the sandbox step as the budget."""
+    seen = {}
+
+    def run(test_file, *, timeout_seconds, settings=None):
+        seen["budget"] = timeout_seconds
+        return SandboxResult(
+            stdout="1 passed", stderr="", exit_code=0, duration_ms=5, timed_out=False
+        )
+
+    client = make_client(run=run)
+    resp = client.post(
+        "/v1/analyze",
+        json={"code": "def f():\n    pass", "max_test_runtime_seconds": 12.5},
+    )
+
+    assert resp.status_code == 200
+    assert seen["budget"] == 12.5
+
+
+def test_timeout_is_504(make_client):
+    """A timed-out sandbox run becomes a 504 (D42), not a false-clean 200."""
+    timed_out = SandboxResult(
+        stdout="", stderr="", exit_code=-1, duration_ms=30000, timed_out=True
+    )
+
+    client = make_client(run=lambda test_file, *, timeout_seconds, settings=None: timed_out)
+    resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
+
+    assert resp.status_code == 504
+    assert "budget" in resp.json()["detail"]
+
+def test_sandbox_failure_is_500_with_stage(make_client):
+    """A PipelineError from the sandbox step becomes a 500 naming the stage (D15, D37)."""
+
+    def run(test_file, *, timeout_seconds, settings=None):
+        raise PipelineError("sandbox_execution", "Kestrel unreachable")
+
+    client = make_client(run=run)
+    resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
+
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["stage"] == "sandbox_execution"
+    assert "sandbox_execution" in body["detail"]
 
 # --- Caller errors map to 400 (the TypeWrightError family) ------------------
 

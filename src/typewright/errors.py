@@ -64,3 +64,17 @@ class PipelineError(Exception):
         self.stage = stage
         self.detail = detail
         super().__init__(f"Pipeline stage {stage!r} failed: {detail}")
+
+
+class SandboxTimeoutError(Exception):
+    """Test execution exceeded its time budget — mapped to 504 (D42).
+
+    Deliberately neither a ``TypeWrightError`` (the caller's input was fine) nor a
+    ``PipelineError`` (no stage failed — the tests ran but did not finish within
+    ``max_test_runtime_seconds``). §7.1 maps an exceeded budget to 504, so it gets its
+    own type and handler rather than folding into the 400/500 families.
+    """
+
+    def __init__(self, budget_seconds: float) -> None:
+        self.budget_seconds = budget_seconds
+        super().__init__(f"Test execution exceeded the {budget_seconds}s time budget.")
