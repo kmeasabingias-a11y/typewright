@@ -436,3 +436,50 @@ Hypothesis persisting its example DB under the read-only cwd; **`deadline=None`*
 pytest entrypoint), so the file must drive pytest itself, its process exit code becoming pytest's. Per the
 D20/D28/D35 cadence this is Unit 1 (standalone capability + mocked tests); wiring `/v1/analyze` to return
 `bugs_found` is a later unit, so the public API and `PROJECT_BRIEF.md` are untouched here.
+
+### D39 — Parse sandbox results by text-scraping pytest/Hypothesis's stable markers (Phase 5, Unit 2)
+**Decision:** A new `src/typewright/results.py` turns a `SandboxResult` into a `BugReport` with no LLM
+and no sandbox-side plugin: it scrapes two markers straight from the captured stdout/stderr — pytest's
+short-summary lines (`FAILED <nodeid>::<test_name> - <message>`), which give the authoritative set of
+failed tests plus the crash message, and Hypothesis's `Falsifying example: test_x(<args>)` blocks, which
+give the failing input. The args are read with a **balanced-bracket scan** (tracking `()[]{}` and
+skipping brackets inside string literals) so a multi-line or nested example survives, then normalised to
+one line. Each failed `test_<property_class>[_n]` is mapped back to the detected property's `relation`
+(strip the `test_` prefix and any `_n` repeat suffix → the n-th detected property of that class) so
+`violated_property` carries the relation, not just a class name. A timed-out run and a clean run both
+yield zero bugs; a safety net builds best-effort bugs from falsifying examples if the short summary is
+ever absent (a non-default pytest setup). `parse_results(result, analysis)` is a plain function (no seam
+needed — it's pure, LLM-free, and unit-tested directly on real-shaped output).
+**Why:** The alternative considered was a self-owned pytest plugin injected into the sandbox preamble
+that emits structured JSON to stdout (the parser would then `json.loads` it). It is more robust to output-
+format drift, but it runs extra custom code inside the *untrusted* execution path and adds moving parts to
+the file we execute — and crucially the failing **input** still has to be scraped from Hypothesis's
+`Falsifying example` text even with JSON, so JSON's marginal benefit is small. The `FAILED …` summary and
+`Falsifying example:` markers have been stable across pytest/Hypothesis versions for years, and pytest
+shows the short failure summary by default — so text-scraping meets the Phase 5 exit criterion (bugs with
+failing inputs) with the least code and the simplest sandbox file. The JSON-hook route is recorded as the
+hardening path (Phase 9) if scraping ever proves flaky. Step 6 of PROJECT_BRIEF §3 ("Result parsing — no
+LLM") is exactly this.
+
+### D40 — Bug shape + two-way severity (`crash` vs `property_violation`) (Phase 5, Unit 2)
+**Decision:** `models.py` gains `BugSeverity` (`crash`, `property_violation`), `Bug`
+(`test_name`, `failing_input`, `error`, `violated_property`, `severity`), and `BugReport`
+(`bugs`, `timed_out`, `exit_code`, `tests_passed`, `tests_failed`, `output_truncated`). Severity is
+**two-way**: a failure whose pytest message is a rewritten assertion (`assert …`) or an `AssertionError`
+is a **`property_violation`** (an asserted relation failed = a silent wrong answer), reported with
+`error="AssertionError"`; any other uncaught exception is a **`crash`** whose `error` is the leading
+exception-type token (e.g. `IndexError`). `Bug` carries `test_name` (one field beyond the brief's four —
+real and useful for traceability, allowed by D5 which forbids only *promised-but-unreal* fields); the
+brief's single-value `failing_input` example is generalised to the full args text (`v=''`, `x=0, y=3`).
+`BugReport` is the internal return type; the API will surface only `bugs` (as `bugs_found`) in Unit 3.
+**Why:** The two-way split is the meaningful one for this tool: "the function returned a wrong answer"
+(the property-detection thesis from D23 — silent bugs, not just crashes) versus "the function threw". A
+third `error` bucket (for tests that error without a falsifying example) was considered and rejected for
+an early phase — fuzzier category, larger surface; an errored test simply produces no bug and is visible
+via `exit_code`. Detecting severity from the message (not just the FAILED line's first token) is required
+because pytest renders a bare `assert` failure *without* an `AssertionError:` prefix, so keying on the
+first token alone would misclassify the common case as a crash. `BugReport`'s extra fields (`timed_out`,
+counts, truncation) are what Unit 3 needs to choose 504 and fill the brief's future `metadata` without a
+second pass over the output. Per the standalone-first cadence (D20/D28/D35) this unit adds the models and
+parser only; `AnalyzeResponse` and `PROJECT_BRIEF.md` §5 stay untouched until Unit 3 makes `bugs_found`
+real.

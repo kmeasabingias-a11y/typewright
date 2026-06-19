@@ -180,6 +180,46 @@ class GeneratedTestFile(BaseModel):
     skipped: list[str] = Field(default_factory=list)
 
 
+class BugSeverity(str, enum.Enum):
+    """How a falsified property failed (Phase 5, D40)."""
+
+    CRASH = "crash"  # the function raised an uncaught, non-assertion exception
+    PROPERTY_VIOLATION = "property_violation"  # an asserted relation failed — a silent wrong answer
+
+
+class Bug(BaseModel):
+    """One falsified property: the test that failed, the input that broke it, and how badly.
+
+    Phase 5 (D40). ``failing_input`` is the argument text from Hypothesis's falsifying
+    example (e.g. ``"v=''"`` or ``"x=0, y=3"``); ``error`` is the exception type
+    (``"AssertionError"`` for a violated relation, else the crash type, e.g. ``"IndexError"``);
+    ``violated_property`` is the detected relation the test was asserting.
+    """
+
+    test_name: str
+    failing_input: str
+    error: str
+    violated_property: str
+    severity: BugSeverity
+
+
+class BugReport(BaseModel):
+    """Result of running the generated tests in the sandbox (Phase 5): the bugs found plus
+    the run's outcome metadata.
+
+    The API surfaces ``bugs`` as ``bugs_found`` (Unit 3); the rest lets the endpoint decide a
+    timeout (504 when ``timed_out``) and fill run metadata. A clean run (``exit_code == 0``) or a
+    timed-out run yields no bugs.
+    """
+
+    bugs: list[Bug] = Field(default_factory=list)
+    timed_out: bool = False
+    exit_code: int = 0
+    tests_passed: int = 0
+    tests_failed: int = 0
+    output_truncated: bool = False
+
+
 class AnalyzedFunction(BaseModel):
     """The lean, API-facing view of a parsed function."""
 
