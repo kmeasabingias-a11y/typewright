@@ -390,3 +390,49 @@ honest contract for no real gain at this stage. All-or-nothing instead reuses th
 key-less (D21). `test_file` is the obvious name beside `properties` and `strategy_plan`. Recorded in
 `PROJECT_BRIEF.md` §5 (the D5 "expose once real" rule), the second field that rule has added to the
 response after `strategy_plan`.
+
+### D37 — Talk to Kestrel via a thin internal `/execute` client, not the shipped SDK (Phase 5, Unit 1)
+**Decision:** TypeWright reaches the Kestrel sandbox through a small internal client, `src/typewright/kestrel.py`:
+a ~40-line httpx wrapper over the stateless `POST /execute` endpoint only. It returns a frozen
+`SandboxResult` dataclass mirroring Kestrel's `ExecuteResponse` field-for-field (`stdout`, `stderr`,
+`exit_code`, `duration_ms`, `timed_out`, `stdout_truncated`, `stderr_truncated`). Auth is
+`Authorization: Bearer <key>` (header omitted when `kestrel_api_key` is `None`, since Kestrel runs
+auth-off locally); the per-run `timeout_seconds` is sent in the body, and the httpx read timeout is set
+to that budget **+ `kestrel_http_timeout_buffer_seconds`** so the HTTP call outlives a legitimately long
+run instead of aborting it client-side. Only a transport/HTTP failure raises — as
+`PipelineError(stage="sandbox_execution")` → 500; a *timed-out* run comes back as data (`timed_out=True`),
+mirroring Kestrel's own "timeout is data, not an error" contract. `run_in_sandbox` is the call seam; the
+`_client()` factory is the test seam (monkeypatched with an `httpx.MockTransport`, so the suite needs no
+live Kestrel). `httpx` moves from a dev-only to a declared runtime dependency, because this module imports
+it directly (it was previously only transitive via litellm).
+**Why:** The shipped `kestrel_client` SDK (v0.8.0, in the Kestrel repo) is real and mature, but depending
+on it is awkward here: it is not published to a registry (a path dep is machine-specific; a git-subdir dep
+couples our build to the Kestrel repo being reachable), and almost all of it — sessions, streaming, rich
+outputs — is surface we never touch. A one-endpoint wrapper keeps TypeWright self-contained and buildable
+in Docker/CI with no Kestrel checkout present, and reuses the established `_client()` seam idiom from the
+LLM modules. The contract was verified directly against the Kestrel server source, not just the SDK/docs:
+`ExecuteRequest`/`ExecuteResponse` (`api/schemas.py`), the `HTTPBearer` scheme and auth-disabled path
+(`api/auth.py`), and the route returning a 200-with-`timed_out=True` (only raising on a real executor
+error) and clamping `timeout_seconds` down to the server ceiling (`api/routes.py`). The cost is a little
+duplicated request/response code for the `/execute` slice — small and worth the decoupling. (Carried to
+Unit 3: a Kestrel `429`/`Retry-After` currently folds into a 500; the 100,000-char `code` cap can 422 a
+pathological file — both to be handled when the endpoint is wired.)
+
+### D38 — Add the Kestrel sandbox preamble at execution time, not in the Phase 4 output (Phase 5, Unit 1)
+**Decision:** The sandbox-only preamble — `os.chdir("/tmp")`, a **database-less and deadline-less**
+Hypothesis profile, and a `if __name__ == "__main__": sys.exit(pytest.main([__file__, "-q", "-p",
+"no:cacheprovider"]))` runner — is wrapped around the test file at execution time by
+`execution.wrap_for_sandbox`, NOT baked into the Phase 4 `GeneratedTestFile.source`. The Phase 4 output
+stays a clean, self-contained pytest file (its contract from D33/D36 is untouched); `execution.run_tests`
+wraps then submits via `run_in_sandbox`.
+**Why:** Separation of concerns along the existing boundary (§2): testgen produces a *portable* test file a
+developer can still run locally with `pytest`, and the sandbox layer owns the bits that only make sense
+inside Kestrel. Baking the preamble into the Phase 4 file (the alternative considered) was rejected: it
+would make `test_file.source` sandbox-specific — `os.chdir("/tmp")` fails on a normal machine — and reopen
+the Phase 4 contract and its tests for no gain. The preamble's specifics follow Kestrel's read-only-cwd
+execution model (`running-test-workloads.md` §4): `/tmp` is the one writable path; `database=None` stops
+Hypothesis persisting its example DB under the read-only cwd; **`deadline=None`** stops the constrained
+1-CPU sandbox's slowness from masquerading as a property failure; and Kestrel runs `python main.py` (no
+pytest entrypoint), so the file must drive pytest itself, its process exit code becoming pytest's. Per the
+D20/D28/D35 cadence this is Unit 1 (standalone capability + mocked tests); wiring `/v1/analyze` to return
+`bugs_found` is a later unit, so the public API and `PROJECT_BRIEF.md` are untouched here.

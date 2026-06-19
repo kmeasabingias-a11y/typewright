@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     llm_max_retries: int = 2      # Instructor reask attempts on invalid output
     llm_max_tokens: int = 1024    # detected-property lists are small
     llm_temperature: float = 0.0  # deterministic detection; low temp curbs fabrication
+# --- Kestrel sandbox (Phase 5) ---
+    # Where TypeWright reaches Kestrel's /execute endpoint, and the bearer key to call
+    # it with (None when Kestrel auth is off). Both read from the TYPEWRIGHT_ prefix:
+    # TYPEWRIGHT_KESTREL_BASE_URL / TYPEWRIGHT_KESTREL_API_KEY (D37).
+    kestrel_base_url: str = "http://localhost:8000"
+    kestrel_api_key: str | None = None
+    # The httpx read timeout is the run budget + this margin, so the HTTP call outlives
+    # a legitimately long sandbox run instead of aborting it client-side.
+    kestrel_http_timeout_buffer_seconds: float = 15.0
 
     def model_for_tier(self, tier: str) -> str:
         """Resolve a request's ``model_tier`` to a concrete model string.
