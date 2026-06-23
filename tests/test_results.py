@@ -104,6 +104,27 @@ SAMPLE_MULTI = (
     "2 failed in 0.20s\n"
 )
 
+# Real pytest -q layout: Hypothesis's "Falsifying example:" block is rendered INSIDE the
+# FAILURES traceback, so pytest prefixes every line with its "E   " marker. The hand-written
+# SAMPLE_ASSERT omits that; the live smoke (2026-06-24) showed the parser leaking it as
+# "E x='A' E". This reproduces the real shape.
+SAMPLE_ASSERT_EPREFIX = (
+    "F                                                                        [100%]\n"
+    "=================================== FAILURES ===================================\n"
+    "_____________________________ test_idempotence _____________________________\n"
+    "    @given(x=st.text())\n"
+    "    def test_idempotence(x):\n"
+    ">       assert normalize(normalize(x)) == normalize(x)\n"
+    "E       assert 'AA' == 'A'\n"
+    "E       Falsifying example: test_idempotence(\n"
+    "E           x='A',\n"
+    "E       )\n"
+    "main.py:14: AssertionError\n"
+    "=========================== short test summary info ============================\n"
+    "FAILED main.py::test_idempotence - assert 'AA' == 'A'\n"
+    "1 failed in 0.30s\n"
+)
+
 
 def test_all_passed_yields_no_bugs():
     report = results.parse_results(_result(SAMPLE_PASS, exit_code=0), ANALYSIS)
@@ -185,4 +206,15 @@ def test_fallback_builds_bugs_when_summary_is_absent():
 
     assert len(report.bugs) == 1
     assert report.bugs[0].failing_input == "x='Z'"
+    assert report.bugs[0].severity == BugSeverity.PROPERTY_VIOLATION
+
+
+def test_falsifying_example_with_pytest_E_prefix_is_stripped():
+    # Regression for the live-smoke bug: the input must come back clean ("x='A'"),
+    # not "E x='A' E", when the Falsifying block carries pytest's "E   " prefixes.
+    report = results.parse_results(_result(SAMPLE_ASSERT_EPREFIX, exit_code=1), ANALYSIS)
+
+    assert len(report.bugs) == 1
+    assert report.bugs[0].failing_input == "x='A'"
+    assert report.bugs[0].error == "AssertionError"
     assert report.bugs[0].severity == BugSeverity.PROPERTY_VIOLATION

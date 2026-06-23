@@ -73,8 +73,19 @@ def _scan_balanced(text: str, open_idx: int) -> tuple[str, int]:
 
 
 def _normalise_args(args: str) -> str:
-    """Collapse a multi-line args capture to one tidy line, dropping a trailing comma."""
-    collapsed = re.sub(r"\s+", " ", " ".join(p.strip() for p in args.splitlines())).strip()
+    """Collapse a multi-line args capture to one tidy line, dropping a trailing comma.
+
+    Real ``pytest -q`` renders Hypothesis's "Falsifying example:" block INSIDE the FAILURES
+    traceback, so every line carries pytest's ``E   `` exception-line marker (e.g.
+    ``E       x=-1,``). Strip that leading ``E``+whitespace prefix per line so it does not
+    leak into the captured input; clean (un-prefixed) Hypothesis output is unaffected.
+    """
+    lines: list[str] = []
+    for part in (p.strip() for p in args.splitlines()):
+        if part == "E" or part.startswith("E "):
+            part = part[1:].strip()
+        lines.append(part)
+    collapsed = re.sub(r"\s+", " ", " ".join(lines)).strip()
     return collapsed[:-1].rstrip() if collapsed.endswith(",") else collapsed
 
 
