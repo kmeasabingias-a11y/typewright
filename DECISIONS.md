@@ -519,3 +519,26 @@ timed-out run carries *no information* about whether the function is correct, ye
 all-clear is the worst possible failure mode. 504 is also exactly what PROJECT_BRIEF §7.1 specifies for an
 exceeded `max_test_runtime_seconds`. The distinct exception type keeps the status-code mapping a single
 `isinstance`/handler dispatch at the edge, consistent with the D8/D15 error-to-status design.
+
+### D43 — The custom test-runtime image: Python 3.12 for parity, pinned-minimal deps, no USER/WORKDIR/CMD (Phase 5)
+**Decision:** Add `docker/test-runtime.Dockerfile` — the image Kestrel runs each generated property-test file
+inside. It is `FROM python:3.12-slim` with `pip install --no-cache-dir pytest==9.0.3 hypothesis==6.155.2`
+(the exact `uv.lock` versions) and nothing else, `ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1`, plus a
+build-time `python -c "import pytest, hypothesis"` smoke that fails the build if the install is broken. It sets
+**no `USER`, `WORKDIR`, or `CMD`**, because Kestrel's executor drives the container as `docker run --user
+65534:65534 --read-only --tmpfs /tmp:size=64m --workdir /sandbox <image> python /sandbox/main.py` — those three
+would be overridden. The sandbox preamble (`os.chdir("/tmp")`, DB-less Hypothesis profile, `__main__` runner)
+is **not** baked in here; `execution.py` adds it at run time (D38). Tagged `typewright-test-runtime:0.1`; Kestrel
+is pointed at it with `KESTREL_EXECUTOR_DOCKER_IMAGE`.
+**Why:** *Python 3.12 (not the 3.11 of running-test-workloads.md §2's example)* matches TypeWright's dev and app
+image, so the generated tests run on the same interpreter they were parsed and generated against — no
+version-skew false results. *Pinned to the exact lock versions, not floating,* because `results.py` parses bugs
+by **text-scraping** pytest's `FAILED …` and Hypothesis's `Falsifying example: …` markers (D39); a future
+release that reworded those would silently break the parser, so the sandbox must run the versions TypeWright was
+built against. *Minimal (just pytest + hypothesis),* because every generated file imports only those two plus
+stdlib the function-under-test uses — numpy/pandas were considered and deferred as speculative (no current input
+needs them; easy to add a layer when one does). *Verifying how Kestrel launches the container first* (reading
+its `docker_executor.py`) is what let us drop `USER`/`WORKDIR`/`CMD`: the network-less, read-only,
+uid-65534, 256 MiB/1-CPU/64-pid sandbox is Kestrel's boundary, so the image is deliberately a plain interpreter
++ the two deps and nothing defensive of its own. (Live end-to-end smoke is the final Phase-5 step, run once
+Kestrel is up; WSL2 does not enforce the 256 MiB cap, so a local smoke won't catch OOM.)
