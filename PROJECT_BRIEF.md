@@ -5,11 +5,10 @@
 > Where this file and the PDF differ, **this file wins**, and `DECISIONS.md` records
 > why. Keep this file current as the project evolves.
 >
-> **Status:** Phases 1–4 complete; Phase 5 (Kestrel integration) functionally complete. `/v1/analyze`
-> runs the full parse → detect → generate strategies → generate test file → run-in-sandbox chain,
-> returning `bugs_found` (the failing inputs from running the generated tests in Kestrel). The custom
-> pytest/Hypothesis runtime image (`docker/test-runtime.Dockerfile`, D43) is in place; the only step
-> left is a live end-to-end smoke against a running Kestrel.
+> **Status:** Phases 1–5 complete. `/v1/analyze` runs the full parse → detect → generate strategies →
+> generate test file → run-in-sandbox chain, returning `bugs_found` (the failing inputs from running the
+> generated tests in Kestrel) — verified by a live end-to-end smoke (D43 runtime image). Phase 6 (fix
+> suggestions) is next.
 
 ## 1. The goal
 
@@ -114,12 +113,13 @@ Each step is one specific LLM call with structured output — not a free-form ag
 - **Phase 4 — Test File Generation.** ✅ Done. Third LLM call → complete, self-contained pytest
   file asserting the relations; returned from `/v1/analyze` as `test_file`. *Exit: generated files
   run under pytest (pass = clean, fail = bug) without crashing at collection.*
-- **Phase 5 — Kestrel Integration.** 🔄 Functionally complete. Thin `kestrel.py` `/execute` client
+- **Phase 5 — Kestrel Integration.** ✅ Done. Thin `kestrel.py` `/execute` client
   (D37) + sandbox execution (D38) + result parsing (D39/D40); `/v1/analyze` runs the generated tests
-  in the sandbox and returns `bugs_found` (D41), with a 504 for timed-out runs (D42). The custom
-  runtime image `docker/test-runtime.Dockerfile` (python:3.12-slim + pinned pytest/hypothesis, D43)
-  is in place. Remaining: a live end-to-end smoke against a running Kestrel.
-  *Exit: `/v1/analyze` returns bugs with failing inputs.*
+  in the sandbox and returns `bugs_found` (D41), with a 504 for timed-out runs (D42). Custom
+  runtime image `docker/test-runtime.Dockerfile` (python:3.12-slim + pinned pytest/hypothesis, D43).
+  Verified by a live end-to-end smoke against a running Kestrel (real bugs with failing inputs; the
+  smoke also caught + fixed a `results.py` pytest-`E`-prefix parsing bug).
+  *Exit: `/v1/analyze` returns bugs with failing inputs.* ✅ met.
 - **Phase 6 — Fix Suggestions.** Fourth LLM call; verify the fix re-runs green, else "no
   confident fix." *Exit: a verified fix for ~60%+ of detected bugs on the golden set.*
 - **Phase 7 — GitHub App.** Webhook → background queue → diff → per-function analysis →
