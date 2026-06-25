@@ -5,10 +5,12 @@
 > Where this file and the PDF differ, **this file wins**, and `DECISIONS.md` records
 > why. Keep this file current as the project evolves.
 >
-> **Status:** Phases 1–5 complete. `/v1/analyze` runs the full parse → detect → generate strategies →
-> generate test file → run-in-sandbox chain, returning `bugs_found` (the failing inputs from running the
-> generated tests in Kestrel) — verified by a live end-to-end smoke (D43 runtime image). Phase 6 (fix
-> suggestions) is next.
+> **Status:** Phases 1–5 complete; **Phase 6 functionally complete** (mechanism wired + unit-green;
+> the live golden-set measurement is the remaining step). `/v1/analyze` runs the full parse → detect →
+> generate strategies → generate test file → run-in-sandbox chain, returning `bugs_found`, and — when the
+> caller sets `include_fix_suggestion` and bugs are found — an optional `fix_suggestion`: a corrected
+> function **verified** by re-running the same tests in Kestrel (D44/D45). A live end-to-end fix smoke
+> (the ~60% golden-set exit metric) closes Phase 6; Phase 7 (GitHub App) follows.
 
 ## 1. The goal
 
@@ -120,8 +122,13 @@ Each step is one specific LLM call with structured output — not a free-form ag
   Verified by a live end-to-end smoke against a running Kestrel (real bugs with failing inputs; the
   smoke also caught + fixed a `results.py` pytest-`E`-prefix parsing bug).
   *Exit: `/v1/analyze` returns bugs with failing inputs.* ✅ met.
-- **Phase 6 — Fix Suggestions.** Fourth LLM call; verify the fix re-runs green, else "no
-  confident fix." *Exit: a verified fix for ~60%+ of detected bugs on the golden set.*
+- **Phase 6 — Fix Suggestions.** 🔄 Functionally complete (wired + unit-green; live golden-set
+  metric pending). Fourth LLM call (`fixgen.suggest_fix`, opt-in via `include_fix_suggestion`, D44):
+  propose a corrected function, **verify it by re-running the SAME generated tests** against it in the
+  sandbox (D45) — `verified=true` only when that re-run is green, else "no confident fix"
+  (`verified=false`). The fix step is best-effort: any failure degrades `fix_suggestion` rather than
+  failing the request (D44). *Exit: a verified fix for ~60%+ of detected bugs on the golden set* — to be
+  measured in the live fix smoke.
 - **Phase 7 — GitHub App.** Webhook → background queue → diff → per-function analysis →
   PR comment. *Exit: install on a test repo, open a buggy PR, see a comment within 2 min.*
 - **Phase 8 — Web Demo.** Paste-a-function UI using the same engine. *Exit: public URL; a
@@ -147,7 +154,9 @@ Each step is one specific LLM call with structured output — not a free-form ag
 `function_name` optional (inferred when the source has one function). `model_tier` is one
 of `economy` / `standard` / `premium` (unknown → standard). `max_test_runtime_seconds` is
 the per-run sandbox budget in seconds (Phase 5; falls back to the configured default, and
-Kestrel clamps it to its own ceiling). `include_fix_suggestion` arrives with Phase 6.
+Kestrel clamps it to its own ceiling). `include_fix_suggestion` (Phase 6, D44) defaults to **false**;
+set it true to also get a verified `fix_suggestion` when bugs are found — opt-in because it adds an LLM
+call plus a second sandbox run.
 
 **Response** (fields appear only once their phase makes them real — D5)
 ```json

@@ -542,3 +542,59 @@ its `docker_executor.py`) is what let us drop `USER`/`WORKDIR`/`CMD`: the networ
 uid-65534, 256 MiB/1-CPU/64-pid sandbox is Kestrel's boundary, so the image is deliberately a plain interpreter
 + the two deps and nothing defensive of its own. (Live end-to-end smoke is the final Phase-5 step, run once
 Kestrel is up; WSL2 does not enforce the 256 MiB cap, so a local smoke won't catch OOM.)
+
+## Phase 6 — Fix Suggestions
+
+### D44 — Opt-in fix suggestion is best-effort, not part of the all-or-nothing chain (Phase 6)
+**Decision:** A new `src/typewright/fixgen.py` adds the fourth and final LLM call (`suggest_fix`, stage
+`"fix_suggestion"`): given the function source + the `BugReport` from running the generated tests, the model
+returns a `ProposedFix` (a corrected function as source + a one-line explanation). Two models, mirroring D35's
+raw→artifact split: `ProposedFix` is the LLM's raw output; `FixSuggestion` is the verified artifact the API
+returns (`code`, `verified`, `tests_passed`, `tests_failed`, plus the extra honest fields `explanation` and a
+fixed `disclaimer` carrying the brief's "AI suggestion — review carefully" label — allowed by D5, which forbids
+only promised-but-unreal fields; cf. D40). The step is **opt-in**: `AnalyzeRequest` gains
+`include_fix_suggestion` (default **false** — the field D22 deferred to this phase), and the route runs the fix
+step **only when the caller set it AND bugs were found** (no bugs → nothing to fix → no LLM call).
+`AnalyzeResponse` gains `fix_suggestion: FixSuggestion | None` — an honest three-state: `null` = not requested
+or no bugs; present with `verified=false` = the brief's "no confident fix"; present with `verified=true` =
+proven. Crucially, the fix step is **best-effort and breaks the all-or-nothing rule** (D30/D36/D41): a
+fix-generation `PipelineError` → `fix_suggestion: null`; an unrunnable corrected file or a verification
+timeout/transport error → `verified=false` — none of these become a 500/504. Orchestration lives in a small
+`_maybe_suggest_fix` helper in `main.py`; `suggest_fix` is injected through a fifth `get_suggest_fix` dependency
+(the established test seam, D21/D30/D36/D41).
+**Why:** Every earlier stage is mandatory and all-or-nothing because each is a prerequisite for the next and a
+partial pipeline is a dishonest result (D30/D36/D41). Fix suggestion is different on both counts: it is the
+*last* step, downstream of an already-complete, already-valid analysis (the real value — `bugs_found` — is in
+hand), and the brief itself calls it "optional" (§3 Step 7). Failing the whole request because the optional,
+most-expensive step hiccuped would *discard* the valid bugs the caller came for — the worst trade. Best-effort
+degradation keeps `bugs_found` intact and reports the fix as simply absent or unverified. Opt-in (default false)
+is the same honesty/cost discipline as D22: the step adds a fourth LLM call **plus a second sandbox run**
+(verification, D45), so a caller pays for it only by asking — the web demo (Phase 8) will expose it as a
+checkbox, which is exactly "let the user decide per request". `ProposedFix` vs `FixSuggestion` keeps the seam
+clean (the model owns the proposed code; `fixgen`/the route own the verdict), just as D35 split `GeneratedTests`
+from `GeneratedTestFile`.
+
+### D45 — Verify a fix by re-running the SAME tests; a single attempt, no refine loop (Phase 6)
+**Decision:** A proposed fix is verified by **swapping the corrected function into the SAME generated test file
+and re-running it in Kestrel** — never by trusting the model or by writing fresh tests. `fixgen.build_fix_file`
+does the swap deterministically: it `ast.parse`-validates the corrected source, confirms it defines a top-level
+function of the original name, replaces the original function block (`testgen` embedded it as `meta.source.strip()`
+verbatim, D32/D33, so an exact single-occurrence replace is reliable) and re-validates the whole reassembled
+file — returning `None` if any of that fails. The route runs that swapped file through the **existing
+`get_run_tests` seam** and the **pure `parse_results`** (so one mock covers both the initial and the
+verification run), then `fixgen.finalize` reads the verdict: `verified` iff the re-run has no bugs, did not time
+out, and exited 0. It is a **single attempt** — if the re-run still fails, the fix is surfaced with
+`verified=false` ("no confident fix"); it is **not** iterated. A verification-run timeout or transport error
+degrades to `verified=false` and does **not** 504/500 the request (unlike the *primary* run's timeout, D42).
+**Why:** Re-using the *same* property tests as the oracle is the whole point: the tests are
+implementation-independent relations (D23), so a green re-run is real evidence the bug is gone — whereas asking
+the model to write new tests for its own fix, or to self-certify, is circular (the model grading its own work).
+Swapping only the function definition (and owning that splice deterministically) means the imports and the
+assertions are byte-for-byte the ones that *found* the bug, so nothing changed between "failing" and "passing"
+except the code under test. `build_fix_file` returning `None` rather than raising keeps the best-effort contract
+(D44): a malformed fix can't be verified, so it's reported unverified, not as a server error. Single-attempt
+mirrors D19's "one structured call, defer the agentic draft→critique→refine loop until quality is shown to need
+it": a refine loop multiplies cost (each round is another LLM call + another sandbox run) and code, and the MVP
+exit metric (~60% verified on the golden set) is measurable without it. The verification timeout *not* mapping
+to 504 follows from D44's best-effort rule — the primary `bugs_found` is valid and must survive a slow
+fix-verification.
