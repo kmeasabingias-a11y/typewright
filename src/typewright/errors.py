@@ -78,3 +78,16 @@ class SandboxTimeoutError(Exception):
     def __init__(self, budget_seconds: float) -> None:
         self.budget_seconds = budget_seconds
         super().__init__(f"Test execution exceeded the {budget_seconds}s time budget.")
+
+
+class GitHubError(Exception):
+    """A GitHub API call failed (auth, fetch, or comment) — Phase 7.
+
+    Raised by ``github.py`` and handled by the worker, which logs/retries and skips commenting.
+    It is NOT request-scoped (the worker runs off a queue, not behind the API), so unlike the
+    other errors here it maps to no HTTP status.
+    """
+
+    def __init__(self, detail: str) -> None:
+        self.detail = detail
+        super().__init__(f"GitHub API error: {detail}")

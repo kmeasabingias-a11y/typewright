@@ -60,13 +60,18 @@ class Settings(BaseSettings):
     # The httpx read timeout is the run budget + this margin, so the HTTP call outlives
     # a legitimately long sandbox run instead of aborting it client-side.
     kestrel_http_timeout_buffer_seconds: float = 15.0
-    
+
 
     # --- GitHub App (Phase 7) ---
     # HMAC secret for verifying webhook deliveries (X-Hub-Signature-256). When unset/empty,
     # signature verification is SKIPPED with a warning (local dev only) — set it in any real
     # deployment. App-auth + Redis settings arrive with the units that use them (D1).
     github_webhook_secret: str | None = None
+    # GitHub App identity for minting installation tokens (Phase 7, D48). The private key is the
+    # .pem GitHub generates for the App; point at the FILE rather than inlining a multi-line PEM
+    # in an env var. Unset in dev/tests (the client is mocked).
+    github_app_id: str | None = None
+    github_app_private_key_path: str | None = None
 
     def model_for_tier(self, tier: str) -> str:
         """Resolve a request's ``model_tier`` to a concrete model string.
