@@ -95,3 +95,18 @@ def post_comment(repo_full_name: str, pr_number: int, body: str, token: str) -> 
             resp.raise_for_status()
     except httpx.HTTPError as exc:
         raise GitHubError(f"posting comment failed: {exc}") from exc
+    
+
+def get_file_content(repo_full_name: str, path: str, ref: str, token: str) -> str:
+    """Fetch the raw text of a file at ``ref`` (a commit SHA), via the contents API."""
+    try:
+        with _client(token) as client:
+            resp = client.get(
+                f"/repos/{repo_full_name}/contents/{path}",
+                params={"ref": ref},
+                headers={"Accept": "application/vnd.github.raw+json"},
+            )
+            resp.raise_for_status()
+            return resp.text
+    except httpx.HTTPError as exc:
+        raise GitHubError(f"fetching {path}@{ref[:7]} failed: {exc}") from exc

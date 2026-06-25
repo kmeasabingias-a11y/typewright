@@ -102,3 +102,21 @@ def test_post_comment_http_error_raises(monkeypatch):
     )
     with pytest.raises(GitHubError):
         github.post_comment("octo/repo", 7, "x", "tok")
+
+
+def test_get_file_content_returns_raw(monkeypatch):
+    def handler(request):
+        assert request.url.path == "/repos/octo/repo/contents/src/app.py"
+        assert dict(request.url.params)["ref"] == "abc123"
+        return httpx.Response(200, text="def f():\n    return 1\n")
+
+    monkeypatch.setattr(github, "_client", lambda token: _mock_client(handler, token))
+    assert github.get_file_content("octo/repo", "src/app.py", "abc123", "tok").startswith("def f()")
+
+
+def test_get_file_content_http_error_raises(monkeypatch):
+    monkeypatch.setattr(
+        github, "_client", lambda token: _mock_client(lambda req: httpx.Response(404), token)
+    )
+    with pytest.raises(GitHubError):
+        github.get_file_content("octo/repo", "missing.py", "abc123", "tok")
