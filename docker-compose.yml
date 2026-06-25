@@ -1,0 +1,9 @@
+# Phase 7 (D46): Redis backs the arq job queue between the webhook (web process) and the worker.
+# The first compose file — D12 deferred it until a second service existed; the queue is it.
+# For the live smoke, run the API and the arq worker as host processes; this brings up Redis.
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped

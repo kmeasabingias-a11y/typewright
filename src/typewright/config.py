@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     # in an env var. Unset in dev/tests (the client is mocked).
     github_app_id: str | None = None
     github_app_private_key_path: str | None = None
+    # arq job queue (Phase 7, D46): Redis between the webhook and the background worker.
+    redis_url: str = "redis://localhost:6379"
 
     def model_for_tier(self, tier: str) -> str:
         """Resolve a request's ``model_tier`` to a concrete model string.

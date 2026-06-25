@@ -13,6 +13,7 @@ dependencies = [
     "instructor>=1.15.1",
     "httpx>=0.27",
     "pyjwt[crypto]>=2.13.0",
+    "arq>=0.28.0",
 ]
 
 [dependency-groups]

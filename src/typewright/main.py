@@ -45,6 +45,7 @@ from .parser import parse_function
 from .results import parse_results
 from .testgen import generate_test_file
 from .webhook import parse_pull_request_event, verify_signature
+from .worker import enqueue as worker_enqueue
 
 logger = logging.getLogger("typewright")
 
@@ -83,18 +84,13 @@ def get_suggest_fix() -> Callable[..., ProposedFix]:
     return suggest_fix
 
 
-async def _log_only_enqueue(job: PullRequestJob) -> None:
-    """Default enqueue: log and drop. The real arq enqueue is wired in Unit 5 (D46)."""
-    logger.warning(
-        "queue not wired yet — dropping job for %s #%d (Phase 7 Unit 5 wires arq)",
-        job.repo_full_name,
-        job.pr_number,
-    )
-
-
 def get_enqueue() -> Callable[[PullRequestJob], Awaitable[None]]:
-    """Dependency provider for enqueuing a PR analysis job (test seam; arq wiring in Unit 5)."""
-    return _log_only_enqueue
+    """Dependency provider for enqueuing a PR analysis job onto the arq queue (D46).
+
+    Overridden in tests with a capturing fake; in production it pushes onto Redis via arq
+    (``typewright.worker.enqueue``), and a separate worker process runs the analysis.
+    """
+    return worker_enqueue
 
 
 def _maybe_suggest_fix(
