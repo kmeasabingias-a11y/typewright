@@ -598,3 +598,61 @@ it": a refine loop multiplies cost (each round is another LLM call + another san
 exit metric (~60% verified on the golden set) is measurable without it. The verification timeout *not* mapping
 to 504 follows from D44's best-effort rule — the primary `bugs_found` is valid and must survive a slow
 fix-verification.
+
+## Phase 7 — GitHub App
+
+### D46 — Architecture: arq + Redis (Postgres deferred), one summary comment, best-effort per function
+**Decision:** The GitHub App is a deterministic pipeline behind a webhook: `POST /webhook/github` verifies +
+enqueues and returns fast; a **separate arq worker** (Redis-backed) does the minutes-long analysis and posts
+**one summary issue comment** on the PR. Three forks, chosen for the leanest credible path to the exit criterion:
+(1) **Queue = arq** (asyncio-native Redis queue) over Celery/RQ (sync, heavier ceremony) or FastAPI
+BackgroundTasks (in-process, lost on restart) — it fits the async FastAPI/LiteLLM stack and is a real, durable
+background queue. The blocking pipeline (LLM + sandbox, all sync) is offloaded to a **thread** inside the async
+task (`asyncio.to_thread`) so it never blocks arq's event loop. (2) **Persistence = Redis only; Postgres
+deferred** — the webhook delivery carries `installation_id`, so installation tokens are minted **on demand** per
+job (no install table); run-history / a shareable `GET /v1/runs/{id}` link are not built yet. Postgres arrives in
+Phase 8/9 when a feature first reads/writes it (D1). (3) **Output = one markdown issue comment** (PR comments are
+issue comments) over Check Runs / inline annotations — the simplest GitHub surface that meets "see a comment
+within 2 min"; richer formats are later polish. The worker is **best-effort per function**: one function's
+pipeline failure is logged and skipped so a single bad function doesn't sink the whole PR, and the bot comments
+**only when bugs are found** (clean PRs get no comment — avoids noise).
+**Why:** Every earlier phase ran in-process behind one request; Phase 7 is the first that genuinely can't —
+GitHub needs a sub-10s 2xx, and per-PR analysis is minutes of LLM + sandbox work across several functions, so the
+work MUST be out-of-process and durable (a crash/redeploy mustn't drop a PR). arq is the smallest thing that
+gives that and matches the async stack. Deferring Postgres keeps the phase to exactly the infra the exit
+criterion needs (a queue) and honors D1 — installation tokens are short-lived and derivable from each delivery,
+so persisting installs earns nothing yet. One comment over Check Runs keeps the GitHub API surface tiny (no
+line-mapping, no check lifecycle). Best-effort-per-function mirrors the D44 fix-step lesson at PR scale: the
+value is the bugs we *did* find; one unanalyzable function (or a flaky stage) must not blank the whole report.
+
+### D47 — Webhook: verify the RAW body, act only on real PR events, enqueue behind a seam
+**Decision:** `webhook.py` holds two pure functions — `verify_signature` (constant-time HMAC-SHA256 of the
+**raw** request body against `X-Hub-Signature-256`) and `parse_pull_request_event` (a minimal `PullRequestJob`
+only for actions in {opened, synchronize, reopened}; everything else → `None`). The route is thin I/O: read the
+raw body, verify, parse, enqueue via an injected `get_enqueue` seam (a capturing fake in tests, the real arq
+`enqueue` in prod), and reply **202 queued / 200 ignored / 403 bad-signature / 400 bad-JSON**. When no
+`github_webhook_secret` is configured, verification is **skipped with a warning** (dev only) — the same
+empty-secret-disables idiom Kestrel uses for its dev API key.
+**Why:** GitHub signs the exact bytes it sent, so verification must hash the raw body, never a re-serialized
+payload (key ordering/whitespace would differ) — hence raw-body-in-the-route, pure-verify-in-the-module. The
+actionable-actions filter keeps us off the firehose of PR sub-events (labels, assignments) that don't change
+code. 202 (not the brief's illustrative 200) is the textbook "accepted for async processing." The pure/seam
+split makes the security-critical bit (signature) unit-testable with a known HMAC and the route key-/network-free.
+
+### D48 — A thin GitHub client (no SDK) + pure diff→functions, mirroring the existing seams
+**Decision:** `github.py` is a thin **sync** httpx client (mirroring `kestrel.py`/D37, not the PyGithub SDK):
+build an App JWT (RS256 via PyJWT, signed with the App's private-key **file**), exchange it for an
+installation token on demand, then `list_pr_files` (paginated), `get_file_content` (raw media type), and
+`post_comment`. Any failure raises **`GitHubError`** — deliberately NOT request-scoped (the worker runs off the
+queue, not behind the API), so it maps to no HTTP status; the worker logs/skips. `diff.py` is pure: parse the
+unified-diff `patch` into the set of changed NEW-file line numbers, then intersect with each top-level function's
+AST line span (reusing the existing `parser`) to get the changed `FunctionMetadata`s. `analysis.py`'s
+`analyze_one` reuses the **exact pipeline functions** the HTTP route uses (not the route itself) and always
+attempts a verified fix when bugs exist; `comment.py` renders one markdown body. The private key is a file PATH,
+not an inlined multi-line PEM in an env var.
+**Why:** We need three endpoints, not the whole PyGithub surface — the same calculus as D37 (don't take a heavy
+dep for a thin slice), and reusing the `kestrel.py` sync-httpx + `_client()`-seam shape means the tests look
+identical (MockTransport, no network). Sync throughout (with the worker offloading to a thread, D46) avoids a
+sync/async pipeline rewrite. Splitting "which lines changed" (pure patch parsing) from "which functions changed"
+(AST intersection) keeps both unit-testable on plain strings and reuses the parser we already trust. A
+file-path private key sidesteps multi-line-PEM-in-env pain and matches how GitHub hands you the `.pem`.

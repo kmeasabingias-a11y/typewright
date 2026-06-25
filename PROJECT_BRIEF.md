@@ -10,7 +10,10 @@
 > `include_fix_suggestion` and bugs are found — an optional `fix_suggestion`: a corrected function
 > **verified** by re-running the same tests in Kestrel (D44/D45). Verified live: the Phase-6 fix smoke
 > produced a verified fix for **4/4** detected golden-set bugs (100%, > the ~60% exit bar) with no false
-> positive on the correct control. Phase 7 (GitHub App) is next.
+> positive on the correct control. **Phases 1–7 complete.** The GitHub App (webhook → arq/Redis queue →
+worker → diff → per-function analysis → one PR comment; D46–D48) was verified live: a real PR adding a buggy
+`absolute` got a bot comment in ~24s with both property violations *and* a **verified** fix. Phase 8 (web
+demo) is next.
 
 ## 1. The goal
 
@@ -129,8 +132,13 @@ Each step is one specific LLM call with structured output — not a free-form ag
   `fix_suggestion` rather than failing the request (D44). *Exit: a verified fix for ~60%+ of detected
   bugs on the golden set.* ✅ met — the live fix smoke produced verified fixes for **4/4** detected
   golden-set bugs (100%), with no false positive on the correct control.
-- **Phase 7 — GitHub App.** Webhook → background queue → diff → per-function analysis →
-  PR comment. *Exit: install on a test repo, open a buggy PR, see a comment within 2 min.*
+- **Phase 7 — GitHub App.** ✅ Done. `POST /webhook/github` verifies the signature and enqueues onto an **arq/Redis** queue (D46/D47);
+  a separate **worker** mints an installation token, pulls the PR's changed `.py` files, extracts the
+  changed top-level functions from the diff, runs each through the existing pipeline (+ a verified fix),
+  and posts **one summary comment** (D48). Best-effort per function; comments only when bugs are found.
+  Postgres deferred (installation tokens are minted on demand; D1). *Exit: install on a test repo, open a
+  buggy PR, see a comment within 2 min.* ✅ met — live: a buggy `absolute` PR got a `[bot]` comment with 2
+  property violations + a verified fix in ~24s of analysis.
 - **Phase 8 — Web Demo.** Paste-a-function UI using the same engine. *Exit: public URL; a
   recruiter pastes a function and sees bugs in ~60s.*
 - **Phase 9 — Observability, Cost Controls, Hardening.** Full tracing, per-install rate
@@ -198,8 +206,9 @@ parse, or `function_name` not found) · 429 (rate limit) · 500 (pipeline failur
 includes the failing `stage`) · 504 (exceeded `max_test_runtime_seconds`).
 
 ### Other endpoints
-- `POST /webhook/github` (internal) — GitHub events; signature-validated; 200 immediately,
-  work dispatched to a queue.
+- `POST /webhook/github` (internal) — GitHub `pull_request` events; HMAC-SHA256 signature-validated on
+  the raw body (D47); **202** with the work enqueued onto arq/Redis (200 for ignored events, 403 bad
+  signature). A separate worker analyzes the PR's changed functions and comments (D46/D48).
 - `GET /v1/runs/{analysis_id}` (public) — fetch a previous analysis (shareable links).
 - **Auth:** web demo unauthenticated + rate-limited per IP; GitHub App uses GitHub's JWT;
   future API consumers use an API key.

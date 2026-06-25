@@ -30,3 +30,6 @@ dist/
 
 # Internal planning doc (mentions Claude; contains private strategy notes) — keep local only
 TypeWright_Project_Brief.pdf
+
+# GitHub App private key — never commit
+*.pem
