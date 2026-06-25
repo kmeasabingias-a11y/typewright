@@ -220,6 +220,49 @@ class BugReport(BaseModel):
     output_truncated: bool = False
 
 
+class ProposedFix(BaseModel):
+    """The LLM's raw Phase 6 output (D44): a corrected version of the function under test
+    plus a one-line explanation.
+
+    Only the corrected SOURCE comes from the model. fixgen never trusts the model's word that
+    the fix works — it swaps this function into the SAME generated tests and re-runs them in the
+    sandbox (D45). ``corrected_source`` must be a drop-in replacement: same name and signature,
+    defining only that function (no imports, no tests).
+    """
+
+    corrected_source: str = Field(
+        ...,
+        description=(
+            "The complete corrected function as source code — SAME name and signature as the "
+            "original, a drop-in replacement. Define ONLY this function: no imports, no tests, "
+            "no commentary."
+        ),
+    )
+    explanation: str = Field(
+        ..., description="One sentence: what was wrong and what the fix changes."
+    )
+
+
+class FixSuggestion(BaseModel):
+    """Phase 6 result (D44/D45): a corrected function, VERIFIED by re-running the SAME property
+    tests against it in the sandbox.
+
+    ``verified`` is True only when that re-run came back green (no bugs, did not time out,
+    exit_code 0); a ``verified=False`` suggestion is the brief's "no confident fix" — surfaced,
+    but flagged unproven. ``code`` / ``verified`` / ``tests_passed`` / ``tests_failed`` are the
+    §5 fields; ``explanation`` and ``disclaimer`` are extra honest fields (real and useful —
+    allowed by D5, which forbids only promised-but-unreal fields; cf. D40). The disclaimer carries
+    the brief's mandated "AI suggestion — review carefully" label (§3 Step 7).
+    """
+
+    code: str
+    explanation: str
+    verified: bool
+    tests_passed: int = 0
+    tests_failed: int = 0
+    disclaimer: str = "AI suggestion — review carefully before applying."
+
+
 class AnalyzedFunction(BaseModel):
     """The lean, API-facing view of a parsed function."""
 
