@@ -10,11 +10,13 @@ from typewright.main import (
     get_generate_test_file,
     get_infer_properties,
     get_run_tests,
+    get_suggest_fix,
 )
 from typewright.models import (
     DetectedProperty,
     GeneratedStrategy,
     GeneratedTestFile,
+    ProposedFix,
     PropertyAnalysis,
     PropertyClass,
     StrategyPlan,
@@ -69,6 +71,12 @@ SAMPLE_SANDBOX_RESULT = SandboxResult(
     timed_out=False,
 )
 
+# Default proposed fix: same name/signature as the sample function, so build_fix_file splices it.
+SAMPLE_PROPOSED_FIX = ProposedFix(
+    corrected_source="def f(x):\n    return x",
+    explanation="example fix",
+)
+
 
 def _default_infer(meta, *, model_tier=None) -> PropertyAnalysis:
     return SAMPLE_ANALYSIS
@@ -86,9 +94,13 @@ def _default_run(test_file, *, timeout_seconds, settings=None) -> SandboxResult:
     return SAMPLE_SANDBOX_RESULT
 
 
+def _default_suggest(meta, report, *, model_tier=None) -> ProposedFix:
+    return SAMPLE_PROPOSED_FIX
+
+
 @pytest.fixture
 def make_client():
-    """Factory for a TestClient whose four pipeline steps are all mocked.
+    """Factory for a TestClient whose five pipeline steps are all mocked.
 
     Detection, generation, test generation, AND sandbox execution are injected via
     dependencies (D21, D28, D36, D41); overriding them lets API tests run with no live key
@@ -103,12 +115,14 @@ def make_client():
         gen=_default_gen,
         gen_tests=_default_testgen,
         run=_default_run,
+        suggest=_default_suggest,
     ) -> TestClient:
         app = create_app()
         app.dependency_overrides[get_infer_properties] = lambda: infer
         app.dependency_overrides[get_generate_strategies] = lambda: gen
         app.dependency_overrides[get_generate_test_file] = lambda: gen_tests
         app.dependency_overrides[get_run_tests] = lambda: run
+        app.dependency_overrides[get_suggest_fix] = lambda: suggest
         client = TestClient(app)
         clients.append(client)
         return client

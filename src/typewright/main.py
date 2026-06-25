@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 from .config import Settings, get_settings
 from .errors import PipelineError, SandboxTimeoutError, TypeWrightError
 from .execution import run_tests
+from .fixgen import build_fix_file, finalize, suggest_fix
 from .generation import generate_strategies
 from .inference import infer_properties
 from .kestrel import SandboxResult
@@ -30,7 +31,11 @@ from .models import (
     AnalyzedFunction,
     AnalyzeRequest,
     AnalyzeResponse,
+    BugReport,
+    FixSuggestion,
+    FunctionMetadata,
     GeneratedTestFile,
+    ProposedFix,
     PropertyAnalysis,
     StrategyPlan,
 )
@@ -64,6 +69,54 @@ def get_run_tests() -> Callable[..., SandboxResult]:
     so API tests mock only the sandbox HTTP call and exercise the real parser end-to-end.
     """
     return run_tests
+
+
+def get_suggest_fix() -> Callable[..., ProposedFix]:
+    """Dependency provider for the fix-suggestion LLM step (test seam, D44).
+
+    Only the LLM call is injected; verification reuses ``get_run_tests`` (the same sandbox
+    seam), so one mock covers both the initial run and the fix's verification re-run.
+    """
+    return suggest_fix
+
+
+def _maybe_suggest_fix(
+    request: AnalyzeRequest,
+    meta: FunctionMetadata,
+    properties: PropertyAnalysis,
+    test_file: GeneratedTestFile,
+    report: BugReport,
+    budget: float,
+    suggest: Callable[..., ProposedFix],
+    run: Callable[..., SandboxResult],
+) -> FixSuggestion | None:
+    """Optionally propose a fix and verify it — best-effort, never fails the request (Phase 6).
+
+    Runs only when the caller set ``include_fix_suggestion`` AND bugs were found. The fix is
+    verified by swapping the corrected function into the SAME test file (``build_fix_file``) and
+    re-running it through the same injected sandbox seam (D45). Unlike the all-or-nothing main
+    chain (D30/D36/D41), every failure here degrades to a ``null`` / ``verified=false`` suggestion
+    rather than sinking the already-valid ``bugs_found`` (D44): a fix-gen LLM error -> null; an
+    unrunnable corrected file or a verification timeout/transport error -> ``verified=false``.
+    """
+    if not request.include_fix_suggestion or not report.bugs:
+        return None
+    try:
+        proposed = suggest(meta, report, model_tier=request.model_tier)
+    except PipelineError as exc:
+        logger.warning("fix suggestion skipped (generation failed): %s", exc)
+        return None
+
+    fix_file = build_fix_file(test_file, meta, proposed)
+    verify_report: BugReport | None = None
+    if fix_file is not None:
+        try:
+            verify_result = run(fix_file, timeout_seconds=budget)
+            if not verify_result.timed_out:
+                verify_report = parse_results(verify_result, properties)
+        except PipelineError as exc:
+            logger.warning("fix verification inconclusive (sandbox failed): %s", exc)
+    return finalize(proposed, verify_report)
 
 
 def create_app() -> FastAPI:
@@ -110,15 +163,18 @@ def create_app() -> FastAPI:
         gen: Callable[..., StrategyPlan] = Depends(get_generate_strategies),
         gen_tests: Callable[..., GeneratedTestFile] = Depends(get_generate_test_file),
         run: Callable[..., SandboxResult] = Depends(get_run_tests),
+        suggest: Callable[..., ProposedFix] = Depends(get_suggest_fix),
         settings: Settings = Depends(get_settings),
     ) -> AnalyzeResponse:
-        """Parse → detect → generate strategies → generate tests → run in the sandbox (Phase 5).
+        """Parse → detect → strategies → tests → run in the sandbox → optional fix (Phase 6).
 
         Parsing failures are caller errors (-> 400); a failure inside any LLM stage or the
         sandbox call raises ``PipelineError`` (-> 500 with the failing stage); a run that
-        exceeds its budget raises ``SandboxTimeoutError`` (-> 504, D42). The chain is
+        exceeds its budget raises ``SandboxTimeoutError`` (-> 504, D42). The core chain is
         all-or-nothing: a 200 always carries a full result, with ``bugs_found`` possibly empty
-        (D30, D36, D41).
+        (D30, D36, D41). The Phase 6 fix step is the exception — opt-in and best-effort: it runs
+        only when ``include_fix_suggestion`` is set and bugs were found, and any failure there
+        degrades ``fix_suggestion`` rather than failing the request (D44).
         """
         metadata = parse_function(request.code, request.function_name)
         properties = infer(metadata, model_tier=request.model_tier)
@@ -137,8 +193,15 @@ def create_app() -> FastAPI:
         if report.timed_out:
             raise SandboxTimeoutError(budget)
 
+        fix_suggestion = _maybe_suggest_fix(
+            request, metadata, properties, test_file, report, budget, suggest, run
+        )
+
         logger.info(
-            "analyzed function %r: %d bug(s) found", metadata.name, len(report.bugs)
+            "analyzed function %r: %d bug(s) found%s",
+            metadata.name,
+            len(report.bugs),
+            "" if fix_suggestion is None else f", fix verified={fix_suggestion.verified}",
         )
         return AnalyzeResponse(
             analysis_id=str(uuid.uuid4()),
@@ -147,6 +210,7 @@ def create_app() -> FastAPI:
             strategy_plan=strategy_plan,
             test_file=test_file,
             bugs_found=report.bugs,
+            fix_suggestion=fix_suggestion,
         )
 
     return app

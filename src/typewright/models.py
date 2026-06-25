@@ -313,16 +313,26 @@ class AnalyzeRequest(BaseModel):
             "clamps any value down to its own ceiling (D41)."
         ),
     )
+    include_fix_suggestion: bool = Field(
+        default=False,
+        description=(
+            "When true AND bugs are found, attempt a verified fix suggestion (Phase 6, LLM "
+            "call #4 + a second sandbox run to verify). Optional; defaults to false, so fix "
+            "generation is opt-in per request (D44) — the field D22 deferred to this phase."
+        ),
+    )
 
 
 class AnalyzeResponse(BaseModel):
     """Response of POST /v1/analyze.
 
-    Phase 5: the parsed ``function``, the ``properties`` it appears to satisfy (D23), the
-    ``strategy_plan`` (D29, D30), the ``test_file`` (D33, D36), and ``bugs_found`` — the
-    failing inputs discovered by running that test file in the Kestrel sandbox (D40, D41);
-    the list is empty when every property held. ``fix_suggestion`` and ``metadata`` appear
-    only once their phases make them real (D5).
+    Phase 6: the parsed ``function``, the ``properties`` it appears to satisfy (D23), the
+    ``strategy_plan`` (D29, D30), the ``test_file`` (D33, D36), ``bugs_found`` — the failing
+    inputs discovered by running that test file in the Kestrel sandbox (D40, D41; empty when
+    every property held) — and ``fix_suggestion``: a corrected function verified by re-running
+    the SAME tests (D44, D45). ``fix_suggestion`` is ``null`` unless the caller set
+    ``include_fix_suggestion`` AND bugs were found; a present suggestion with ``verified=false``
+    is the honest "no confident fix". ``metadata`` appears once its phase (9) makes it real (D5).
     """
 
     analysis_id: str
@@ -331,3 +341,4 @@ class AnalyzeResponse(BaseModel):
     strategy_plan: StrategyPlan
     test_file: GeneratedTestFile
     bugs_found: list[Bug] = Field(default_factory=list)
+    fix_suggestion: FixSuggestion | None = None

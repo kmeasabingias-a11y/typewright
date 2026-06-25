@@ -9,7 +9,7 @@ key is needed.
 """
 
 from typewright.errors import PipelineError
-from typewright.models import GeneratedTestFile, PropertyAnalysis, StrategyPlan
+from typewright.models import GeneratedTestFile, ProposedFix, PropertyAnalysis, StrategyPlan
 from typewright.kestrel import SandboxResult
 
 
@@ -35,7 +35,8 @@ def test_analyze_returns_parsed_function(client):
 
 
 def test_analyze_returns_only_the_honest_subset(client):
-    """Phase 5 returns analysis_id + function + properties + strategy_plan + test_file + bugs_found — not fix yet."""
+    """Phase 6 returns function + properties + strategy_plan + test_file + bugs_found +
+    fix_suggestion (null unless requested). metadata is not real yet (D5)."""
     resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
 
     body = resp.json()
@@ -46,6 +47,7 @@ def test_analyze_returns_only_the_honest_subset(client):
         "strategy_plan",
         "test_file",
         "bugs_found",
+        "fix_suggestion",
     }
     assert set(body["properties"].keys()) == {
         "detected",
@@ -54,7 +56,8 @@ def test_analyze_returns_only_the_honest_subset(client):
     }
     assert set(body["strategy_plan"].keys()) == {"strategies", "extra_imports"}
     assert set(body["test_file"].keys()) == {"source", "test_names", "skipped"}
-    assert "fix_suggestion" not in body
+    assert body["fix_suggestion"] is None  # not requested -> null
+    assert "metadata" not in body
 
 
 def test_analyze_includes_detected_properties(client):
@@ -268,6 +271,138 @@ def test_sandbox_failure_is_500_with_stage(make_client):
     body = resp.json()
     assert body["stage"] == "sandbox_execution"
     assert "sandbox_execution" in body["detail"]
+
+
+# --- Phase 6: fix suggestion (opt-in, verified by a re-run; D44/D45) ---------
+
+_FAILING_RUN = SandboxResult(
+    stdout=(
+        "Falsifying example: test_idempotence(x='A')\n"
+        "FAILED main.py::test_idempotence - assert 'AA' == 'A'\n"
+        "1 failed in 0.10s\n"
+    ),
+    stderr="",
+    exit_code=1,
+    duration_ms=30,
+    timed_out=False,
+)
+_CLEAN_RUN = SandboxResult(
+    stdout="1 passed in 0.05s", stderr="", exit_code=0, duration_ms=5, timed_out=False
+)
+
+
+def test_fix_suggestion_absent_by_default(client):
+    """Without include_fix_suggestion, no fix is attempted (opt-in, D44)."""
+    resp = client.post("/v1/analyze", json={"code": "def f(x):\n    return x"})
+    assert resp.status_code == 200
+    assert resp.json()["fix_suggestion"] is None
+
+
+def test_fix_suggestion_skipped_when_no_bugs(make_client):
+    """Requested but a clean run -> nothing to fix, and suggest is never called (D44)."""
+    called = {"suggest": False}
+
+    def suggest(meta, report, *, model_tier=None):
+        called["suggest"] = True
+        return ProposedFix(corrected_source="def f(x):\n    return x", explanation="x")
+
+    client = make_client(suggest=suggest)  # default run is clean -> no bugs
+    resp = client.post(
+        "/v1/analyze",
+        json={"code": "def f(x):\n    return x", "include_fix_suggestion": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["fix_suggestion"] is None
+    assert called["suggest"] is False
+
+
+def test_fix_suggestion_verified_when_rerun_green(make_client):
+    """Bugs found, fix proposed, the verification re-run is green -> verified=True (D45)."""
+    calls = {"n": 0}
+
+    def run(test_file, *, timeout_seconds, settings=None):
+        calls["n"] += 1
+        return _FAILING_RUN if calls["n"] == 1 else _CLEAN_RUN
+
+    def suggest(meta, report, *, model_tier=None):
+        return ProposedFix(corrected_source="def f(x):\n    return x", explanation="guarded")
+
+    client = make_client(run=run, suggest=suggest)
+    resp = client.post(
+        "/v1/analyze",
+        json={"code": "def f(x):\n    return x", "include_fix_suggestion": True},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["bugs_found"]) == 1  # the original bug is still reported
+    fix = body["fix_suggestion"]
+    assert fix is not None
+    assert fix["verified"] is True
+    assert fix["code"] == "def f(x):\n    return x"
+    assert calls["n"] == 2  # one run to find bugs, one to verify the fix
+
+
+def test_fix_suggestion_unverified_when_rerun_still_fails(make_client):
+    """The re-run still fails -> 'no confident fix' (verified=False), request still 200 (D44)."""
+
+    def suggest(meta, report, *, model_tier=None):
+        return ProposedFix(corrected_source="def f(x):\n    return x", explanation="attempt")
+
+    client = make_client(
+        run=lambda tf, *, timeout_seconds, settings=None: _FAILING_RUN, suggest=suggest
+    )
+    resp = client.post(
+        "/v1/analyze",
+        json={"code": "def f(x):\n    return x", "include_fix_suggestion": True},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["fix_suggestion"]["verified"] is False
+
+
+def test_fix_generation_failure_degrades_not_500(make_client):
+    """A fix-gen PipelineError degrades to no suggestion — it does NOT sink the analysis (D44)."""
+
+    def suggest(meta, report, *, model_tier=None):
+        raise PipelineError("fix_suggestion", "model unavailable")
+
+    client = make_client(
+        run=lambda tf, *, timeout_seconds, settings=None: _FAILING_RUN, suggest=suggest
+    )
+    resp = client.post(
+        "/v1/analyze",
+        json={"code": "def f(x):\n    return x", "include_fix_suggestion": True},
+    )
+
+    assert resp.status_code == 200  # best-effort: the optional step failing is not a 500
+    body = resp.json()
+    assert len(body["bugs_found"]) == 1  # the real analysis is intact
+    assert body["fix_suggestion"] is None
+
+
+def test_model_tier_is_passed_to_fix(make_client):
+    """The request's model_tier reaches the fix step verbatim."""
+    seen = {}
+
+    def suggest(meta, report, *, model_tier=None):
+        seen["tier"] = model_tier
+        return ProposedFix(corrected_source="def f(x):\n    return x", explanation="x")
+
+    client = make_client(
+        run=lambda tf, *, timeout_seconds, settings=None: _FAILING_RUN, suggest=suggest
+    )
+    resp = client.post(
+        "/v1/analyze",
+        json={
+            "code": "def f(x):\n    return x",
+            "include_fix_suggestion": True,
+            "model_tier": "premium",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert seen["tier"] == "premium"
 
 # --- Caller errors map to 400 (the TypeWrightError family) ------------------
 
