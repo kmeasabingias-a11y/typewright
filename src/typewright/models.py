@@ -263,6 +263,20 @@ class FixSuggestion(BaseModel):
     disclaimer: str = "AI suggestion — review carefully before applying."
 
 
+class PullRequestJob(BaseModel):
+    """The unit of work enqueued from a GitHub ``pull_request`` webhook (Phase 7, D47).
+
+    The minimal slice of the event the worker needs to fetch the diff, analyze the changed
+    functions, and comment back: which repo, which PR, the head commit (analyzed + used to
+    dedupe redeliveries), and the installation whose token authorizes the GitHub API calls.
+    """
+
+    repo_full_name: str  # "owner/repo"
+    pr_number: int
+    head_sha: str
+    installation_id: int
+
+
 class AnalyzedFunction(BaseModel):
     """The lean, API-facing view of a parsed function."""
 

@@ -12,9 +12,10 @@ fully-configured instance, while ``app`` at module scope is what ``uvicorn`` ser
 (``uvicorn typewright.main:app``).
 """
 
+import json
 import logging
 import uuid
-from typing import Callable
+from typing import Awaitable, Callable
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -37,11 +38,13 @@ from .models import (
     GeneratedTestFile,
     ProposedFix,
     PropertyAnalysis,
+    PullRequestJob,
     StrategyPlan,
 )
 from .parser import parse_function
 from .results import parse_results
 from .testgen import generate_test_file
+from .webhook import parse_pull_request_event, verify_signature
 
 logger = logging.getLogger("typewright")
 
@@ -78,6 +81,20 @@ def get_suggest_fix() -> Callable[..., ProposedFix]:
     seam), so one mock covers both the initial run and the fix's verification re-run.
     """
     return suggest_fix
+
+
+async def _log_only_enqueue(job: PullRequestJob) -> None:
+    """Default enqueue: log and drop. The real arq enqueue is wired in Unit 5 (D46)."""
+    logger.warning(
+        "queue not wired yet — dropping job for %s #%d (Phase 7 Unit 5 wires arq)",
+        job.repo_full_name,
+        job.pr_number,
+    )
+
+
+def get_enqueue() -> Callable[[PullRequestJob], Awaitable[None]]:
+    """Dependency provider for enqueuing a PR analysis job (test seam; arq wiring in Unit 5)."""
+    return _log_only_enqueue
 
 
 def _maybe_suggest_fix(
@@ -155,6 +172,48 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         """Liveness probe: returns 200 as long as the process is serving."""
         return {"status": "ok"}
+    
+    @app.post("/webhook/github")
+    async def github_webhook(
+        request: Request,
+        enqueue: Callable[[PullRequestJob], Awaitable[None]] = Depends(get_enqueue),
+        settings: Settings = Depends(get_settings),
+    ) -> JSONResponse:
+        """Receive a GitHub webhook: verify, parse, enqueue, acknowledge fast (Phase 7, D47).
+
+        The signature is checked against the RAW body. Only actionable ``pull_request`` events
+        (opened / synchronize / reopened) enqueue a job; everything else is acknowledged and
+        ignored. We never analyze inline — GitHub needs a quick 2xx, so the work is queued (202)
+        and a worker handles it (Unit 5).
+        """
+        body = await request.body()
+        secret = settings.github_webhook_secret
+        if secret:
+            if not verify_signature(body, request.headers.get("X-Hub-Signature-256"), secret):
+                logger.warning("github webhook: invalid signature")
+                return JSONResponse(status_code=403, content={"detail": "invalid signature"})
+        else:
+            logger.warning(
+                "github_webhook_secret unset — skipping signature verification (dev only)"
+            )
+
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            return JSONResponse(status_code=400, content={"detail": "invalid JSON body"})
+
+        job = parse_pull_request_event(request.headers.get("X-GitHub-Event", ""), payload)
+        if job is None:
+            return JSONResponse(status_code=200, content={"status": "ignored"})
+
+        await enqueue(job)
+        logger.info(
+            "queued PR analysis: %s #%d @ %s",
+            job.repo_full_name,
+            job.pr_number,
+            job.head_sha[:7],
+        )
+        return JSONResponse(status_code=202, content={"status": "queued", "pr": job.pr_number})
 
     @app.post("/v1/analyze", response_model=AnalyzeResponse)
     def analyze(

@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     llm_max_retries: int = 2      # Instructor reask attempts on invalid output
     llm_max_tokens: int = 1024    # detected-property lists are small
     llm_temperature: float = 0.0  # deterministic detection; low temp curbs fabrication
+
+
 # --- Kestrel sandbox (Phase 5) ---
     # Where TypeWright reaches Kestrel's /execute endpoint, and the bearer key to call
     # it with (None when Kestrel auth is off). Both read from the TYPEWRIGHT_ prefix:
@@ -58,6 +60,13 @@ class Settings(BaseSettings):
     # The httpx read timeout is the run budget + this margin, so the HTTP call outlives
     # a legitimately long sandbox run instead of aborting it client-side.
     kestrel_http_timeout_buffer_seconds: float = 15.0
+    
+
+    # --- GitHub App (Phase 7) ---
+    # HMAC secret for verifying webhook deliveries (X-Hub-Signature-256). When unset/empty,
+    # signature verification is SKIPPED with a warning (local dev only) — set it in any real
+    # deployment. App-auth + Redis settings arrive with the units that use them (D1).
+    github_webhook_secret: str | None = None
 
     def model_for_tier(self, tier: str) -> str:
         """Resolve a request's ``model_tier`` to a concrete model string.
