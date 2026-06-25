@@ -263,6 +263,19 @@ class FixSuggestion(BaseModel):
     disclaimer: str = "AI suggestion — review carefully before applying."
 
 
+class FunctionFinding(BaseModel):
+    """One changed function's analysis result, for rendering into the PR comment (Phase 7).
+
+    Produced by the worker after running a changed function through the pipeline: the bugs the
+    generated tests found, and the optional verified fix. ``fix_suggestion`` is None when no fix
+    was attempted (no bugs, or fix generation off/failed).
+    """
+
+    function_name: str
+    bugs: list[Bug] = Field(default_factory=list)
+    fix_suggestion: FixSuggestion | None = None
+
+
 class PullRequestJob(BaseModel):
     """The unit of work enqueued from a GitHub ``pull_request`` webhook (Phase 7, D47).
 
