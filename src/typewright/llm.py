@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from .config import Settings
 from .errors import PipelineError
+from .metrics import add_cost
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -52,17 +53,26 @@ def complete(
     """
     if not settings.anthropic_api_key:
         raise PipelineError(stage, "no LLM API key configured")
+    kwargs = dict(
+        model=model,
+        response_model=response_model,
+        api_key=settings.anthropic_api_key,
+        max_retries=settings.llm_max_retries,
+        max_tokens=settings.llm_max_tokens,
+        temperature=settings.llm_temperature,
+        timeout=settings.llm_timeout_seconds,
+        messages=messages,
+    )
     try:
-        return client_factory().chat.completions.create(
-            model=model,
-            response_model=response_model,
-            api_key=settings.anthropic_api_key,
-            max_retries=settings.llm_max_retries,
-            max_tokens=settings.llm_max_tokens,
-            temperature=settings.llm_temperature,
-            timeout=settings.llm_timeout_seconds,
-            messages=messages,
-        )
+        completions = client_factory().chat.completions
+        # A real Instructor client exposes create_with_completion -> we get the raw response too
+        # and bill its cost (add_cost is a no-op outside an analysis cost_scope). Hand-written test
+        # fakes only have create(), so fall back to it (those paths make no real LLM call to bill).
+        if hasattr(completions, "create_with_completion"):
+            parsed, raw = completions.create_with_completion(**kwargs)
+            add_cost(raw)
+            return parsed
+        return completions.create(**kwargs)
     except PipelineError:
         raise
     except Exception as exc:  # noqa: BLE001 — any LLM/transport failure becomes a 500

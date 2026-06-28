@@ -350,6 +350,21 @@ class AnalyzeRequest(BaseModel):
     )
 
 
+class AnalysisMetadata(BaseModel):
+    """Run metadata for one analysis (Phase 9, D5 made real): cost, timing, and test counts.
+
+    ``llm_cost_usd`` is the summed LiteLLM cost of the analysis's LLM calls (0.0 when the price
+    map lacks the model). ``hypothesis_examples_tried`` is ``None`` until a Hypothesis-statistics
+    hook is added in the sandbox — left honest-null rather than faked (D5/D40).
+    """
+
+    analysis_duration_ms: int = 0
+    llm_cost_usd: float = 0.0
+    tests_generated: int = 0
+    tests_run: int = 0
+    hypothesis_examples_tried: int | None = None
+
+
 class AnalyzeResponse(BaseModel):
     """Response of POST /v1/analyze.
 
@@ -359,7 +374,7 @@ class AnalyzeResponse(BaseModel):
     every property held) — and ``fix_suggestion``: a corrected function verified by re-running
     the SAME tests (D44, D45). ``fix_suggestion`` is ``null`` unless the caller set
     ``include_fix_suggestion`` AND bugs were found; a present suggestion with ``verified=false``
-    is the honest "no confident fix". ``metadata`` appears once its phase (9) makes it real (D5).
+    is the honest "no confident fix". metadata is real as of Phase 9, D51 — was "appears once its phase (9) makes it real (D5)".
     """
 
     analysis_id: str
@@ -369,3 +384,4 @@ class AnalyzeResponse(BaseModel):
     test_file: GeneratedTestFile
     bugs_found: list[Bug] = Field(default_factory=list)
     fix_suggestion: FixSuggestion | None = None
+    metadata: AnalysisMetadata = Field(default_factory=AnalysisMetadata)

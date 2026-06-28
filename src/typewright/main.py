@@ -17,6 +17,7 @@ import logging
 import uuid
 from functools import lru_cache
 from typing import Awaitable, Callable
+import time
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -29,7 +30,9 @@ from .generation import generate_strategies
 from .inference import infer_properties
 from .kestrel import SandboxResult
 from .logging_config import configure_logging
+from .metrics import cost_scope
 from .models import (
+    AnalysisMetadata,
     AnalyzedFunction,
     AnalyzeRequest,
     AnalyzeResponse,
@@ -258,36 +261,46 @@ def create_app() -> FastAPI:
         sandbox call raises ``PipelineError`` (-> 500 with the failing stage); a run that
         exceeds its budget raises ``SandboxTimeoutError`` (-> 504, D42). The core chain is
         all-or-nothing: a 200 always carries a full result, with ``bugs_found`` possibly empty
-        (D30, D36, D41). The Phase 6 fix step is the exception — opt-in and best-effort: it runs
-        only when ``include_fix_suggestion`` is set and bugs were found, and any failure there
-        degrades ``fix_suggestion`` rather than failing the request (D44).
+        (D30, D36, D41). The Phase 6 fix step is opt-in and best-effort (D44). The pipeline runs
+        inside a ``cost_scope`` so every LLM call bills one meter, filling ``metadata`` (Phase 9, D51).
         """
-        metadata = parse_function(request.code, request.function_name)
-        properties = infer(metadata, model_tier=request.model_tier)
-        strategy_plan = gen(metadata, properties, model_tier=request.model_tier)
-        test_file = gen_tests(
-            metadata, properties, strategy_plan, model_tier=request.model_tier
-        )
+        start = time.perf_counter()
+        with cost_scope() as meter:
+            metadata = parse_function(request.code, request.function_name)
+            properties = infer(metadata, model_tier=request.model_tier)
+            strategy_plan = gen(metadata, properties, model_tier=request.model_tier)
+            test_file = gen_tests(
+                metadata, properties, strategy_plan, model_tier=request.model_tier
+            )
 
-        budget = (
-            request.max_test_runtime_seconds
-            if request.max_test_runtime_seconds is not None
-            else settings.kestrel_timeout_seconds
-        )
-        sandbox_result = run(test_file, timeout_seconds=budget)
-        report = parse_results(sandbox_result, properties)
-        if report.timed_out:
-            raise SandboxTimeoutError(budget)
+            budget = (
+                request.max_test_runtime_seconds
+                if request.max_test_runtime_seconds is not None
+                else settings.kestrel_timeout_seconds
+            )
+            sandbox_result = run(test_file, timeout_seconds=budget)
+            report = parse_results(sandbox_result, properties)
+            if report.timed_out:
+                raise SandboxTimeoutError(budget)
 
-        fix_suggestion = _maybe_suggest_fix(
-            request, metadata, properties, test_file, report, budget, suggest, run
+            fix_suggestion = _maybe_suggest_fix(
+                request, metadata, properties, test_file, report, budget, suggest, run
+            )
+
+        analysis_metadata = AnalysisMetadata(
+            analysis_duration_ms=int((time.perf_counter() - start) * 1000),
+            llm_cost_usd=round(meter.total_usd, 6),
+            tests_generated=len(test_file.test_names),
+            tests_run=report.tests_passed + report.tests_failed,
         )
 
         logger.info(
-            "analyzed function %r: %d bug(s) found%s",
+            "analyzed function %r: %d bug(s) found%s — $%.4f, %dms",
             metadata.name,
             len(report.bugs),
             "" if fix_suggestion is None else f", fix verified={fix_suggestion.verified}",
+            analysis_metadata.llm_cost_usd,
+            analysis_metadata.analysis_duration_ms,
         )
         response = AnalyzeResponse(
             analysis_id=str(uuid.uuid4()),
@@ -297,6 +310,7 @@ def create_app() -> FastAPI:
             test_file=test_file,
             bugs_found=report.bugs,
             fix_suggestion=fix_suggestion,
+            metadata=analysis_metadata,
         )
         try:
             store.save(response)

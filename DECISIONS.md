@@ -702,3 +702,26 @@ normalized schema) makes the read path a single row → `model_validate_json`, a
 is (D44): the analysis is the value; a storage hiccup must degrade the *link*, not the result. A lookup
 miss is a plain 404 — neither a caller-input error (400) nor a pipeline failure (500) — so it needs no
 domain-error type.
+
+## Phase 9 — Observability, Cost Controls, Hardening
+
+### D51 — Run metadata is real; LLM cost is metered at the chokepoint via a request-scoped contextvar
+**Decision:** `AnalyzeResponse.metadata` (deferred by D5 to "the phase that makes it real") is now
+populated: `analysis_duration_ms` (wall-clock around the pipeline), `llm_cost_usd` (summed LiteLLM cost of
+the analysis's LLM calls), `tests_generated` (`len(test_file.test_names)`), `tests_run`
+(`tests_passed + tests_failed` from the sandbox run), and `hypothesis_examples_tried` (`int | None`, left
+**null** — not yet instrumented; an honest null rather than a fabricated `0`, per D5/D40). Cost is captured
+as a **cross-cutting concern, not threaded through every step**: new `metrics.py` holds a `CostMeter` bound
+to the request by a `contextvars` `cost_scope()` that `/v1/analyze` opens around the whole pipeline; the
+single LLM chokepoint `llm.complete` switches to Instructor's `create_with_completion` (so it can see the raw
+response) and calls `metrics.add_cost(raw)`, which adds that completion's LiteLLM-computed cost to the active
+meter (a no-op outside a scope). A model missing from LiteLLM's price map, or any cost error, degrades to
+`0.0` — cost is **reported, never enforced** here (the budget is Unit 2). Hand-written test fakes expose only
+`create()`, so `complete` falls back to it (a `hasattr` guard) and the existing step tests are untouched.
+**Why:** the metadata block is the spec's §5 contract and the foundation the cost budget (U2) needs. Metering
+at the chokepoint with a request-scoped contextvar keeps every step's signature and tests unchanged — cost
+accounting doesn't belong in the analysis logic, and threading an output sink through four unrelated steps
+would be noise. `create_with_completion` yields the cost **synchronously in the same thread** — more robust
+than a global LiteLLM success-callback, whose in-context firing under FastAPI's threadpool is harder to
+guarantee. Best-effort costing (never throwing) keeps a price-map miss from sinking a valid analysis — the
+same degrade-don't-fail rule as D44.

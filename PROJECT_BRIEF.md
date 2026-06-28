@@ -148,8 +148,12 @@ Each step is one specific LLM call with structured output — not a free-form ag
   input, and the verified fix. Unit 2 (D50) persists each run to SQLite and adds `GET /v1/runs/{id}` for
   shareable links; per-IP rate-limiting is deferred (Phase 9 owns limits). *Exit: public URL; a recruiter
   pastes a function and sees bugs in ~60s.*
-- **Phase 9 — Observability, Cost Controls, Hardening.** Full tracing, per-install rate
-  limits, per-function cost budget. *Exit: production-ready under load.*
+- **Phase 9 — Observability, Cost Controls, Hardening.** 🔄 In progress. Full tracing, per-install/per-IP
+  rate limits, per-function cost budget. **Unit 1 (D51) done:** `AnalyzeResponse.metadata` is now real —
+  `analysis_duration_ms`, `llm_cost_usd` (summed LiteLLM cost, metered at the `llm.complete` chokepoint via a
+  request-scoped `cost_scope()` contextvar), `tests_generated`, `tests_run`, and `hypothesis_examples_tried`
+  (null pending a Hypothesis stats hook). Still to come: cost budget (U2), rate limiting (U3), tracing (U4),
+  hardening edges (U5 — Kestrel 429 passthrough, code-size 422). *Exit: production-ready under load.*
 - **Phase 10 — Polish & launch.** Docs, acknowledgments, final demo.
 
 ## 5. API specification
@@ -204,9 +208,13 @@ call plus a second sandbox run.
   },
   "bugs_found": [ { "test_name": "test_totality", "failing_input": "v=''", "error": "IndexError", "violated_property": "first_char(v) does not raise", "severity": "crash" } ],
   "fix_suggestion": { "code": "...", "verified": true, "tests_passed": 47, "tests_failed": 0 },
-  "metadata": { "analysis_duration_ms": 0, "llm_cost_usd": 0.0, "tests_generated": 0, "tests_run": 0, "hypothesis_examples_tried": 0 }
+  "metadata": { "analysis_duration_ms": 24180, "llm_cost_usd": 0.0123, "tests_generated": 2, "tests_run": 2, "hypothesis_examples_tried": null }
 }
 ```
+
+`metadata` is populated as of Phase 9 Unit 1 (D51): timing + summed LLM cost + test counts.
+`hypothesis_examples_tried` is `null` until a Hypothesis-statistics hook is added in the sandbox —
+honest-null rather than a fabricated count (D5/D40).
 
 **Status codes:** 200 (analysis complete; `bugs_found` may be empty) · 400 (code doesn't
 parse, or `function_name` not found) · 429 (rate limit) · 500 (pipeline failure — body

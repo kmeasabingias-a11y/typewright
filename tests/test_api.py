@@ -35,8 +35,8 @@ def test_analyze_returns_parsed_function(client):
 
 
 def test_analyze_returns_only_the_honest_subset(client):
-    """Phase 6 returns function + properties + strategy_plan + test_file + bugs_found +
-    fix_suggestion (null unless requested). metadata is not real yet (D5)."""
+    """Phase 9 returns function + properties + strategy_plan + test_file + bugs_found +
+    fix_suggestion (null unless requested) + metadata (real as of Phase 9, D51)."""
     resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
 
     body = resp.json()
@@ -48,6 +48,7 @@ def test_analyze_returns_only_the_honest_subset(client):
         "test_file",
         "bugs_found",
         "fix_suggestion",
+        "metadata",
     }
     assert set(body["properties"].keys()) == {
         "detected",
@@ -56,8 +57,14 @@ def test_analyze_returns_only_the_honest_subset(client):
     }
     assert set(body["strategy_plan"].keys()) == {"strategies", "extra_imports"}
     assert set(body["test_file"].keys()) == {"source", "test_names", "skipped"}
+    assert set(body["metadata"].keys()) == {
+        "analysis_duration_ms",
+        "llm_cost_usd",
+        "tests_generated",
+        "tests_run",
+        "hypothesis_examples_tried",
+    }
     assert body["fix_suggestion"] is None  # not requested -> null
-    assert "metadata" not in body
 
 
 def test_analyze_includes_detected_properties(client):
@@ -488,3 +495,14 @@ def test_persist_failure_does_not_fail_analysis(make_client):
     client = make_client(store=BoomStore())
     resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
     assert resp.status_code == 200  # best-effort: a save failure must not sink the analysis
+
+
+def test_analyze_includes_metadata(client):
+    """metadata is populated; on the mocked path cost is 0.0 and counts come from the canned data."""
+    resp = client.post("/v1/analyze", json={"code": "def f(x):\n    return x"})
+    meta = resp.json()["metadata"]
+    assert meta["tests_generated"] == 1            # SAMPLE_TEST_FILE has one test
+    assert meta["tests_run"] == 1                  # SAMPLE_SANDBOX_RESULT: "1 passed"
+    assert meta["llm_cost_usd"] == 0.0             # steps mocked -> no real LLM call billed
+    assert meta["analysis_duration_ms"] >= 0
+    assert meta["hypothesis_examples_tried"] is None
