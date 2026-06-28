@@ -154,9 +154,11 @@ Each step is one specific LLM call with structured output — not a free-form ag
   request-scoped `cost_scope()` contextvar), `tests_generated`, `tests_run`, and `hypothesis_examples_tried`
   (null pending a Hypothesis stats hook). **Unit 2 (D52) done:** a per-analysis cost budget — config
   `max_cost_usd` (default $0.50, hard cap; a request's `max_cost_usd` can only lower it), enforced at the
-  cost meter; an analysis that crosses it aborts with **402** (the fix step degrades instead). Still to come:
-  rate limiting (U3), tracing (U4), hardening edges (U5 — Kestrel 429 passthrough, code-size 422).
-  *Exit: production-ready under load.*
+  cost meter; an analysis that crosses it aborts with **402** (the fix step degrades instead). **Unit 3
+  (D53) done:** rate limiting — per-IP on `/v1/analyze`, per-installation on the webhook (fixed-window,
+  **429** + `Retry-After`), behind a `RateLimiter` seam with an in-memory default and a Redis-backed
+  backend flippable via `rate_limit_backend`. Still to come: tracing (U4), hardening edges (U5 — Kestrel
+  429 passthrough, code-size 422). *Exit: production-ready under load.*
 - **Phase 10 — Polish & launch.** Docs, acknowledgments, final demo.
 
 ## 5. API specification

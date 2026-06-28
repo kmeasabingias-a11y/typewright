@@ -107,3 +107,15 @@ class GitHubError(Exception):
     def __init__(self, detail: str) -> None:
         self.detail = detail
         super().__init__(f"GitHub API error: {detail}")
+
+
+class RateLimitedError(Exception):
+    """A client exceeded its request rate — mapped to 429 (Phase 9, D53).
+
+    Neither a caller-input error (400) nor a broken stage (500): the request was well-formed but
+    arrived too soon. Carries ``retry_after`` (seconds) for the 429's Retry-After header.
+    """
+
+    def __init__(self, retry_after: int) -> None:
+        self.retry_after = retry_after
+        super().__init__(f"Rate limit exceeded; retry after {retry_after}s.")

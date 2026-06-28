@@ -746,3 +746,24 @@ per-analysis guard). 402 is the precise HTTP semantic for "a spend limit was hit
 already valuable; only the optional fix is sacrificed. **Known limitation:** Instructor validation *retries*
 make extra LLM calls but only the final response is billed (we read `create_with_completion`'s final raw),
 so the meter slightly under-counts — conservative for the operator, acceptable.
+
+### D53 — Rate limiting: a fixed-window limiter behind a seam; in-memory default, Redis-switchable
+**Decision:** `POST /v1/analyze` is limited per client IP and `POST /webhook/github` per GitHub
+`installation_id` — a fixed-window counter (`rate_limit_*_per_minute`, default 10/IP and 30/install),
+returning **429** + a `Retry-After` header (new `RateLimitedError`). New `ratelimit.py` defines a
+`RateLimiter` protocol with two implementations: `InMemoryRateLimiter` (per-process, zero-infra — the
+**default**, correct for a single instance) and `RedisRateLimiter` (`INCR`+`EXPIRE`, shared across
+replicas, **fails open** on a Redis error so a limiter blip can't take down the API — the U2 cost budget is
+the hard backstop). `create_app` builds one from `rate_limit_backend` ("memory"|"redis") onto `app.state`;
+a `get_rate_limiter(request)` dependency reads it (per-app-instance → no cross-test bleed, and overridable
+in tests). The client IP is the peer address unless `trust_forwarded_for` is set, in which case the first
+`X-Forwarded-For` IP is used (trustworthy only behind a proxy/tunnel you control — off by default so a
+client can't spoof it). Cheap reads (`GET /`, `/v1/runs/{id}`, `/health`) are unlimited.
+**Why:** rate limiting is what makes a public, unauthenticated demo safe to leave running, and is the
+Phase-9 "production-ready under load" deliverable. The seam + two backends honors both "simplest that works
+now" (in-memory needs no infra and fits the single-host deploy) and "best for the future" (the Redis
+production path ships and flips on with one config value — no future code change). Per-IP for the web and
+per-installation for the webhook match where the cost/abuse actually originates. 429 + Retry-After is the
+standard contract; keeping it distinct from 402 (cost, D52) lets a caller tell "too fast" from "too
+expensive." Fixed-window over sliding/token-bucket: simplest to reason about, one counter per key, adequate
+for a demo. Trusting `X-Forwarded-For` only behind a configured proxy avoids the classic header-spoof bypass.

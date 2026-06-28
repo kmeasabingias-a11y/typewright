@@ -9,6 +9,7 @@ from typewright.main import (
     get_generate_strategies,
     get_generate_test_file,
     get_infer_properties,
+    get_rate_limiter,
     get_run_store,
     get_run_tests,
     get_suggest_fix,
@@ -119,6 +120,7 @@ def make_client():
         run=_default_run,
         suggest=_default_suggest,
         store=None,
+        rate_limiter=None,
     ) -> TestClient:
         run_store = store if store is not None else InMemoryRunStore()
         app = create_app()
@@ -128,6 +130,8 @@ def make_client():
         app.dependency_overrides[get_run_tests] = lambda: run
         app.dependency_overrides[get_suggest_fix] = lambda: suggest
         app.dependency_overrides[get_run_store] = lambda: run_store
+        if rate_limiter is not None:
+            app.dependency_overrides[get_rate_limiter] = lambda: rate_limiter
         client = TestClient(app)
         clients.append(client)
         return client

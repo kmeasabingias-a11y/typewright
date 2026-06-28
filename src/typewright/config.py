@@ -82,6 +82,16 @@ class Settings(BaseSettings):
     # Hard per-analysis LLM-cost ceiling (USD). A request's max_cost_usd can only lower it; an
     # analysis that crosses it aborts with 402. Tune to your model tiers + typical function size.
     max_cost_usd: float = 0.50
+    # --- Rate limiting (Phase 9, D53) ---
+    # Per-IP on /v1/analyze and per-installation on the webhook; 429 + Retry-After. Backend "memory"
+    # (default, per-process — fine for one instance) or "redis" (shared across replicas, uses redis_url).
+    rate_limit_enabled: bool = True
+    rate_limit_backend: str = "memory"          # "memory" | "redis"
+    rate_limit_analyze_per_minute: int = 10     # per client IP
+    rate_limit_webhook_per_minute: int = 30     # per GitHub installation
+    # Trust the first X-Forwarded-For IP as the client — ONLY behind a proxy/tunnel you control
+    # (otherwise a client could spoof it). Default off = use the peer address.
+    trust_forwarded_for: bool = False
 
     def model_for_tier(self, tier: str) -> str:
         """Resolve a request's ``model_tier`` to a concrete model string.

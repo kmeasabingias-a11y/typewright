@@ -537,3 +537,17 @@ def test_request_budget_lowers_the_ceiling(make_client):
         "/v1/analyze", json={"code": "def f():\n    pass", "max_cost_usd": 0.01}
     )
     assert resp.status_code == 402
+
+
+def test_rate_limited_returns_429(make_client):
+    from typewright.ratelimit import RateLimitResult
+
+    class _Blocked:
+        def check(self, key, limit, window_seconds):
+            return RateLimitResult(allowed=False, retry_after=42)
+
+    client = make_client(rate_limiter=_Blocked())
+    resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
+    assert resp.status_code == 429
+    assert resp.headers["retry-after"] == "42"
+    assert resp.json()["retry_after"] == 42

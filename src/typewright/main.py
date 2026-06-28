@@ -23,7 +23,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import Settings, get_settings
-from .errors import CostBudgetExceededError, PipelineError, SandboxTimeoutError, TypeWrightError
+from .errors import CostBudgetExceededError, PipelineError, RateLimitedError, SandboxTimeoutError, TypeWrightError
 from .execution import run_tests
 from .fixgen import build_fix_file, finalize, suggest_fix
 from .generation import generate_strategies
@@ -46,6 +46,7 @@ from .models import (
     StrategyPlan,
 )
 from .parser import parse_function
+from .ratelimit import InMemoryRateLimiter, RateLimiter, RedisRateLimiter
 from .results import parse_results
 from .store import RunStore, SqliteRunStore
 from .testgen import generate_test_file
@@ -97,6 +98,36 @@ def get_enqueue() -> Callable[[PullRequestJob], Awaitable[None]]:
     (``typewright.worker.enqueue``), and a separate worker process runs the analysis.
     """
     return worker_enqueue
+
+
+def _build_rate_limiter(settings: Settings) -> RateLimiter:
+    """Construct the configured rate-limiter backend (D53)."""
+    if settings.rate_limit_backend == "redis":
+        import redis
+
+        return RedisRateLimiter(redis.from_url(settings.redis_url))
+    return InMemoryRateLimiter()
+
+
+def get_rate_limiter(request: Request) -> RateLimiter:
+    """Dependency: the app instance's RateLimiter (one per app → no cross-test bleed; test seam, D53)."""
+    return request.app.state.rate_limiter
+
+
+def _client_ip(request: Request, settings: Settings) -> str:
+    """The caller's IP for rate limiting — the X-Forwarded-For client only when trusted (D53)."""
+    if settings.trust_forwarded_for:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _enforce_rate_limit(limiter: RateLimiter, key: str, limit: int) -> None:
+    """Raise RateLimitedError (-> 429) if ``key`` is over ``limit`` requests this minute (D53)."""
+    result = limiter.check(key, limit, 60)
+    if not result.allowed:
+        raise RateLimitedError(result.retry_after)
 
 
 @lru_cache
@@ -159,6 +190,7 @@ def create_app() -> FastAPI:
     configure_logging(settings)
 
     app = FastAPI(title=settings.app_name, version="0.1.0")
+    app.state.rate_limiter = _build_rate_limiter(settings)
 
     @app.exception_handler(TypeWrightError)
     async def handle_domain_error(request: Request, exc: TypeWrightError) -> JSONResponse:
@@ -197,6 +229,16 @@ def create_app() -> FastAPI:
                 "limit_usd": exc.limit_usd,
             },
         )
+    
+    @app.exception_handler(RateLimitedError)
+    async def handle_rate_limited(request: Request, exc: RateLimitedError) -> JSONResponse:
+        """Map an exceeded request rate to 429 Too Many Requests + Retry-After (D53)."""
+        logger.info("rate limited: %s", exc)
+        return JSONResponse(
+            status_code=429,
+            content={"detail": str(exc), "retry_after": exc.retry_after},
+            headers={"Retry-After": str(exc.retry_after)},
+        )
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -219,6 +261,7 @@ def create_app() -> FastAPI:
     async def github_webhook(
         request: Request,
         enqueue: Callable[[PullRequestJob], Awaitable[None]] = Depends(get_enqueue),
+        limiter: RateLimiter = Depends(get_rate_limiter),
         settings: Settings = Depends(get_settings),
     ) -> JSONResponse:
         """Receive a GitHub webhook: verify, parse, enqueue, acknowledge fast (Phase 7, D47).
@@ -247,6 +290,10 @@ def create_app() -> FastAPI:
         job = parse_pull_request_event(request.headers.get("X-GitHub-Event", ""), payload)
         if job is None:
             return JSONResponse(status_code=200, content={"status": "ignored"})
+        if settings.rate_limit_enabled:
+            _enforce_rate_limit(
+                limiter, f"webhook:{job.installation_id}", settings.rate_limit_webhook_per_minute
+            )
 
         await enqueue(job)
         logger.info(
@@ -260,12 +307,14 @@ def create_app() -> FastAPI:
     @app.post("/v1/analyze", response_model=AnalyzeResponse)
     def analyze(
         request: AnalyzeRequest,
+        http_request: Request,
         infer: Callable[..., PropertyAnalysis] = Depends(get_infer_properties),
         gen: Callable[..., StrategyPlan] = Depends(get_generate_strategies),
         gen_tests: Callable[..., GeneratedTestFile] = Depends(get_generate_test_file),
         run: Callable[..., SandboxResult] = Depends(get_run_tests),
         suggest: Callable[..., ProposedFix] = Depends(get_suggest_fix),
         store: RunStore = Depends(get_run_store),
+        limiter: RateLimiter = Depends(get_rate_limiter),
         settings: Settings = Depends(get_settings),
     ) -> AnalyzeResponse:
         """Parse → detect → strategies → tests → run in the sandbox → optional fix (Phase 6).
@@ -277,6 +326,12 @@ def create_app() -> FastAPI:
         (D30, D36, D41). The Phase 6 fix step is opt-in and best-effort (D44). The pipeline runs
         inside a ``cost_scope`` so every LLM call bills one meter, filling ``metadata`` (Phase 9, D51).
         """
+        if settings.rate_limit_enabled:
+            _enforce_rate_limit(
+                limiter,
+                f"analyze:{_client_ip(http_request, settings)}",
+                settings.rate_limit_analyze_per_minute,
+            )
         cost_budget = (
             settings.max_cost_usd
             if request.max_cost_usd is None
