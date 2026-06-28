@@ -348,6 +348,15 @@ class AnalyzeRequest(BaseModel):
             "generation is opt-in per request (D44) — the field D22 deferred to this phase."
         ),
     )
+    max_cost_usd: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Per-analysis LLM-cost ceiling in USD (Phase 9). Optional; falls back to the configured "
+            "default and is clamped down to the server's max (a request can only lower it, not raise "
+            "it). Crossing it aborts the analysis with 402 (D52)."
+        ),
+    )
 
 
 class AnalysisMetadata(BaseModel):

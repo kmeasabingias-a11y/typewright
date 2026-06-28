@@ -152,8 +152,11 @@ Each step is one specific LLM call with structured output — not a free-form ag
   rate limits, per-function cost budget. **Unit 1 (D51) done:** `AnalyzeResponse.metadata` is now real —
   `analysis_duration_ms`, `llm_cost_usd` (summed LiteLLM cost, metered at the `llm.complete` chokepoint via a
   request-scoped `cost_scope()` contextvar), `tests_generated`, `tests_run`, and `hypothesis_examples_tried`
-  (null pending a Hypothesis stats hook). Still to come: cost budget (U2), rate limiting (U3), tracing (U4),
-  hardening edges (U5 — Kestrel 429 passthrough, code-size 422). *Exit: production-ready under load.*
+  (null pending a Hypothesis stats hook). **Unit 2 (D52) done:** a per-analysis cost budget — config
+  `max_cost_usd` (default $0.50, hard cap; a request's `max_cost_usd` can only lower it), enforced at the
+  cost meter; an analysis that crosses it aborts with **402** (the fix step degrades instead). Still to come:
+  rate limiting (U3), tracing (U4), hardening edges (U5 — Kestrel 429 passthrough, code-size 422).
+  *Exit: production-ready under load.*
 - **Phase 10 — Polish & launch.** Docs, acknowledgments, final demo.
 
 ## 5. API specification
@@ -217,8 +220,13 @@ call plus a second sandbox run.
 honest-null rather than a fabricated count (D5/D40).
 
 **Status codes:** 200 (analysis complete; `bugs_found` may be empty) · 400 (code doesn't
-parse, or `function_name` not found) · 429 (rate limit) · 500 (pipeline failure — body
+parse, or `function_name` not found) · **402 (exceeded the `max_cost_usd` budget — body carries
+`spent_usd`/`limit_usd`, D52)** · 429 (rate limit) · 500 (pipeline failure — body
 includes the failing `stage`) · 504 (exceeded `max_test_runtime_seconds`).
+
+`max_cost_usd` (optional request field, Phase 9 D52) is the per-analysis LLM-cost ceiling in USD;
+it can only **lower** the server's configured cap (`min(request, config)`), and crossing it aborts
+the analysis with 402.
 
 ### Other endpoints
 - `POST /webhook/github` (internal) — GitHub `pull_request` events; HMAC-SHA256 signature-validated on

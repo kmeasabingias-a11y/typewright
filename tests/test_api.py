@@ -506,3 +506,34 @@ def test_analyze_includes_metadata(client):
     assert meta["llm_cost_usd"] == 0.0             # steps mocked -> no real LLM call billed
     assert meta["analysis_duration_ms"] >= 0
     assert meta["hypothesis_examples_tried"] is None
+
+
+def test_over_budget_returns_402(make_client):
+    from typewright.errors import CostBudgetExceededError
+
+    def over_budget(meta, *, model_tier=None):
+        raise CostBudgetExceededError(0.51, 0.50)
+
+    client = make_client(infer=over_budget)
+    resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
+    assert resp.status_code == 402
+    body = resp.json()
+    assert body["limit_usd"] == 0.50
+    assert body["spent_usd"] == 0.51
+
+
+def test_request_budget_lowers_the_ceiling(make_client):
+    from typewright import metrics
+
+    class _Raw:
+        _hidden_params = {"response_cost": 0.02}
+
+    def spend(meta, *, model_tier=None):
+        metrics.add_cost(_Raw())  # 0.02 spent inside the route's cost_scope
+        return None  # never reached — add_cost raises once over the 0.01 budget
+
+    client = make_client(infer=spend)
+    resp = client.post(
+        "/v1/analyze", json={"code": "def f():\n    pass", "max_cost_usd": 0.01}
+    )
+    assert resp.status_code == 402

@@ -17,18 +17,22 @@ import contextvars
 from typing import Iterator
 
 import litellm
+from .errors import CostBudgetExceededError
 
 
 class CostMeter:
     """Accumulates the USD cost of the LLM calls made within one analysis."""
 
-    def __init__(self) -> None:
+    def __init__(self, limit_usd: float | None = None) -> None:
         self.total_usd: float = 0.0
         self.calls: int = 0
+        self.limit_usd: float | None = limit_usd
 
     def add(self, cost_usd: float) -> None:
         self.total_usd += cost_usd
         self.calls += 1
+        if self.limit_usd is not None and self.total_usd > self.limit_usd:
+            raise CostBudgetExceededError(self.total_usd, self.limit_usd)
 
 
 _active_meter: contextvars.ContextVar[CostMeter | None] = contextvars.ContextVar(
@@ -62,9 +66,9 @@ def add_cost(raw_completion: object) -> None:
 
 
 @contextlib.contextmanager
-def cost_scope() -> Iterator[CostMeter]:
-    """Bind a fresh ``CostMeter`` to the current context for one analysis; yield it to read later."""
-    meter = CostMeter()
+def cost_scope(limit_usd: float | None = None) -> Iterator[CostMeter]:
+    """Bind a fresh ``CostMeter`` (optionally budget-capped) to the context for one analysis."""
+    meter = CostMeter(limit_usd=limit_usd)
     token = _active_meter.set(meter)
     try:
         yield meter

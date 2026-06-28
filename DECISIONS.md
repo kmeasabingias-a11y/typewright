@@ -725,3 +725,24 @@ would be noise. `create_with_completion` yields the cost **synchronously in the 
 than a global LiteLLM success-callback, whose in-context firing under FastAPI's threadpool is harder to
 guarantee. Best-effort costing (never throwing) keeps a price-map miss from sinking a valid analysis — the
 same degrade-don't-fail rule as D44.
+
+### D52 — Per-analysis cost budget: a hard ceiling enforced at the meter, surfaced as 402
+**Decision:** An analysis aborts if its LLM cost crosses a ceiling. Config `max_cost_usd` (default 0.50) is
+the server's hard cap; a request may set its own `max_cost_usd` but only to **lower** it
+(`min(request, config)`, never above — the same clamp-down rule Kestrel uses for the timeout, D41). The
+ceiling is enforced where the cost is already known — the `CostMeter`: it carries a `limit_usd`, and `add()`
+raises `CostBudgetExceededError(spent, limit)` the instant the running total crosses it. The route opens
+`cost_scope(effective_budget)`; because `add_cost` runs at the `llm.complete` chokepoint *after* each
+completion, the call that crosses the line completes (already paid for) and the next never fires — **spend
+is bounded at the ceiling plus at most one in-flight call.** `complete` lets the error propagate (not wrapped
+into a 500); a new handler maps it to **402 Payment Required** with `spent_usd`/`limit_usd`. The best-effort
+fix step (D44) catches it too and degrades to `fix_suggestion: null`, so a 402 only escapes the **core**
+pipeline — once `bugs_found` is valid, an over-budget *fix* is dropped, not surfaced as 402.
+**Why:** cost control belongs at the one place that already knows the cost (the meter at the LLM chokepoint),
+so no step signature changes and the cap can't be bypassed. Clamping the request down to a server cap
+protects the operator's bill on a public, unauthenticated demo (general rate limiting is U3; this is the
+per-analysis guard). 402 is the precise HTTP semantic for "a spend limit was hit," kept distinct from 429
+(rate, U3) and 400 (bad input). Degrading the fix step rather than 402-ing it honors D44: the analysis is
+already valuable; only the optional fix is sacrificed. **Known limitation:** Instructor validation *retries*
+make extra LLM calls but only the final response is billed (we read `create_with_completion`'s final raw),
+so the meter slightly under-counts — conservative for the operator, acceptable.

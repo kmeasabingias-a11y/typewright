@@ -80,6 +80,22 @@ class SandboxTimeoutError(Exception):
         super().__init__(f"Test execution exceeded the {budget_seconds}s time budget.")
 
 
+class CostBudgetExceededError(Exception):
+    """An analysis hit its LLM-cost ceiling — mapped to 402 (Phase 9, D52).
+
+    Deliberately neither a ``TypeWrightError`` (the caller's input was fine) nor a ``PipelineError``
+    (no stage failed — the analysis was simply too expensive). Raised from the cost meter at the LLM
+    chokepoint and surfaced as 402 Payment Required, with how much was spent and the ceiling.
+    """
+
+    def __init__(self, spent_usd: float, limit_usd: float) -> None:
+        self.spent_usd = spent_usd
+        self.limit_usd = limit_usd
+        super().__init__(
+            f"Analysis exceeded the ${limit_usd:.2f} cost budget (spent ${spent_usd:.4f})."
+        )
+
+
 class GitHubError(Exception):
     """A GitHub API call failed (auth, fetch, or comment) — Phase 7.
 

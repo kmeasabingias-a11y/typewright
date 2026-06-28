@@ -23,7 +23,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import Settings, get_settings
-from .errors import PipelineError, SandboxTimeoutError, TypeWrightError
+from .errors import CostBudgetExceededError, PipelineError, SandboxTimeoutError, TypeWrightError
 from .execution import run_tests
 from .fixgen import build_fix_file, finalize, suggest_fix
 from .generation import generate_strategies
@@ -137,8 +137,8 @@ def _maybe_suggest_fix(
         return None
     try:
         proposed = suggest(meta, report, model_tier=request.model_tier)
-    except PipelineError as exc:
-        logger.warning("fix suggestion skipped (generation failed): %s", exc)
+    except (PipelineError, CostBudgetExceededError) as exc:
+        logger.warning("fix suggestion skipped (%s): %s", type(exc).__name__, exc)
         return None
 
     fix_file = build_fix_file(test_file, meta, proposed)
@@ -184,6 +184,19 @@ def create_app() -> FastAPI:
         """
         logger.info("analyze timed out: %s", exc)
         return JSONResponse(status_code=504, content={"detail": str(exc)})
+    
+    @app.exception_handler(CostBudgetExceededError)
+    async def handle_cost_budget(request: Request, exc: CostBudgetExceededError) -> JSONResponse:
+        """Map an exceeded LLM-cost budget to 402 Payment Required (D52)."""
+        logger.info("analyze aborted on cost budget: %s", exc)
+        return JSONResponse(
+            status_code=402,
+            content={
+                "detail": str(exc),
+                "spent_usd": round(exc.spent_usd, 6),
+                "limit_usd": exc.limit_usd,
+            },
+        )
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -264,8 +277,13 @@ def create_app() -> FastAPI:
         (D30, D36, D41). The Phase 6 fix step is opt-in and best-effort (D44). The pipeline runs
         inside a ``cost_scope`` so every LLM call bills one meter, filling ``metadata`` (Phase 9, D51).
         """
+        cost_budget = (
+            settings.max_cost_usd
+            if request.max_cost_usd is None
+            else min(request.max_cost_usd, settings.max_cost_usd)
+        )
         start = time.perf_counter()
-        with cost_scope() as meter:
+        with cost_scope(cost_budget) as meter:
             metadata = parse_function(request.code, request.function_name)
             properties = infer(metadata, model_tier=request.model_tier)
             strategy_plan = gen(metadata, properties, model_tier=request.model_tier)

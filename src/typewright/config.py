@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     # SQLite file backing GET /v1/runs/{id} (shareable links). A single-file DB needs no service;
     # in a container point this at a mounted volume so links survive a redeploy.
     runs_db_path: str = "runs.db"
+    # --- Cost controls (Phase 9, D52) ---
+    # Hard per-analysis LLM-cost ceiling (USD). A request's max_cost_usd can only lower it; an
+    # analysis that crosses it aborts with 402. Tune to your model tiers + typical function size.
+    max_cost_usd: float = 0.50
 
     def model_for_tier(self, tier: str) -> str:
         """Resolve a request's ``model_tier`` to a concrete model string.

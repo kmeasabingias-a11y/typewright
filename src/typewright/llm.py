@@ -19,7 +19,7 @@ from litellm import completion
 from pydantic import BaseModel
 
 from .config import Settings
-from .errors import PipelineError
+from .errors import CostBudgetExceededError, PipelineError
 from .metrics import add_cost
 
 T = TypeVar("T", bound=BaseModel)
@@ -73,7 +73,7 @@ def complete(
             add_cost(raw)
             return parsed
         return completions.create(**kwargs)
-    except PipelineError:
+    except (PipelineError, CostBudgetExceededError):
         raise
     except Exception as exc:  # noqa: BLE001 — any LLM/transport failure becomes a 500
         raise PipelineError(stage, str(exc)) from exc
