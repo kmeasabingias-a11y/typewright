@@ -17,7 +17,6 @@ import logging
 import uuid
 from functools import lru_cache
 from typing import Awaitable, Callable
-import time
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -50,6 +49,7 @@ from .ratelimit import InMemoryRateLimiter, RateLimiter, RedisRateLimiter
 from .results import parse_results
 from .store import RunStore, SqliteRunStore
 from .testgen import generate_test_file
+from .tracing import span, trace_scope
 from .web import INDEX_HTML
 from .webhook import parse_pull_request_event, verify_signature
 from .worker import enqueue as worker_enqueue
@@ -317,14 +317,13 @@ def create_app() -> FastAPI:
         limiter: RateLimiter = Depends(get_rate_limiter),
         settings: Settings = Depends(get_settings),
     ) -> AnalyzeResponse:
-        """Parse → detect → strategies → tests → run in the sandbox → optional fix (Phase 6).
+        """Parse → detect → strategies → tests → sandbox → optional fix, traced + cost-metered.
 
-        Parsing failures are caller errors (-> 400); a failure inside any LLM stage or the
-        sandbox call raises ``PipelineError`` (-> 500 with the failing stage); a run that
-        exceeds its budget raises ``SandboxTimeoutError`` (-> 504, D42). The core chain is
-        all-or-nothing: a 200 always carries a full result, with ``bugs_found`` possibly empty
-        (D30, D36, D41). The Phase 6 fix step is opt-in and best-effort (D44). The pipeline runs
-        inside a ``cost_scope`` so every LLM call bills one meter, filling ``metadata`` (Phase 9, D51).
+        Rate-limited per IP (429, D53). Parsing failures are caller errors (400); an LLM/sandbox
+        failure raises ``PipelineError`` (500 + stage); an over-budget run raises
+        ``CostBudgetExceededError`` (402, D52); an exceeded test budget raises ``SandboxTimeoutError``
+        (504, D42). The fix step is opt-in/best-effort (D44). The pipeline runs inside a ``trace_scope``
+        (one structured summary log per analysis, D54) and a ``cost_scope`` (fills ``metadata``, D51).
         """
         if settings.rate_limit_enabled:
             _enforce_rate_limit(
@@ -332,51 +331,61 @@ def create_app() -> FastAPI:
                 f"analyze:{_client_ip(http_request, settings)}",
                 settings.rate_limit_analyze_per_minute,
             )
+
+        analysis_id = str(uuid.uuid4())
         cost_budget = (
             settings.max_cost_usd
             if request.max_cost_usd is None
             else min(request.max_cost_usd, settings.max_cost_usd)
         )
-        start = time.perf_counter()
-        with cost_scope(cost_budget) as meter:
-            metadata = parse_function(request.code, request.function_name)
-            properties = infer(metadata, model_tier=request.model_tier)
-            strategy_plan = gen(metadata, properties, model_tier=request.model_tier)
-            test_file = gen_tests(
-                metadata, properties, strategy_plan, model_tier=request.model_tier
-            )
+        with trace_scope(
+            analysis_id, model_tier=request.model_tier or settings.default_model_tier
+        ) as trace, cost_scope(cost_budget) as meter:
+            with span("parse"):
+                metadata = parse_function(request.code, request.function_name)
+            trace.set(function=metadata.name)
+            with span("detection"):
+                properties = infer(metadata, model_tier=request.model_tier)
+            with span("strategy"):
+                strategy_plan = gen(metadata, properties, model_tier=request.model_tier)
+            with span("testgen"):
+                test_file = gen_tests(
+                    metadata, properties, strategy_plan, model_tier=request.model_tier
+                )
 
             budget = (
                 request.max_test_runtime_seconds
                 if request.max_test_runtime_seconds is not None
                 else settings.kestrel_timeout_seconds
             )
-            sandbox_result = run(test_file, timeout_seconds=budget)
-            report = parse_results(sandbox_result, properties)
+            with span("sandbox"):
+                sandbox_result = run(test_file, timeout_seconds=budget)
+                report = parse_results(sandbox_result, properties)
             if report.timed_out:
                 raise SandboxTimeoutError(budget)
 
-            fix_suggestion = _maybe_suggest_fix(
-                request, metadata, properties, test_file, report, budget, suggest, run
+            with span("fix"):
+                fix_suggestion = _maybe_suggest_fix(
+                    request, metadata, properties, test_file, report, budget, suggest, run
+                )
+
+            trace.set(
+                bugs=len(report.bugs),
+                llm_cost_usd=round(meter.total_usd, 6),
+                llm_calls=meter.calls,
+                tests_generated=len(test_file.test_names),
+                tests_run=report.tests_passed + report.tests_failed,
+                fix_verified=None if fix_suggestion is None else fix_suggestion.verified,
             )
 
         analysis_metadata = AnalysisMetadata(
-            analysis_duration_ms=int((time.perf_counter() - start) * 1000),
+            analysis_duration_ms=trace.duration_ms,
             llm_cost_usd=round(meter.total_usd, 6),
             tests_generated=len(test_file.test_names),
             tests_run=report.tests_passed + report.tests_failed,
         )
-
-        logger.info(
-            "analyzed function %r: %d bug(s) found%s — $%.4f, %dms",
-            metadata.name,
-            len(report.bugs),
-            "" if fix_suggestion is None else f", fix verified={fix_suggestion.verified}",
-            analysis_metadata.llm_cost_usd,
-            analysis_metadata.analysis_duration_ms,
-        )
         response = AnalyzeResponse(
-            analysis_id=str(uuid.uuid4()),
+            analysis_id=analysis_id,
             function=AnalyzedFunction.from_metadata(metadata),
             properties=properties,
             strategy_plan=strategy_plan,

@@ -767,3 +767,22 @@ per-installation for the webhook match where the cost/abuse actually originates.
 standard contract; keeping it distinct from 402 (cost, D52) lets a caller tell "too fast" from "too
 expensive." Fixed-window over sliding/token-bucket: simplest to reason about, one counter per key, adequate
 for a demo. Trusting `X-Forwarded-For` only behind a configured proxy avoids the classic header-spoof bypass.
+
+### D54 — Tracing: per-analysis structured traces in the logs (stage timeline + outcome), backend-agnostic
+**Decision:** Each analysis emits ONE structured trace — the pipeline stage timeline plus the outcome — to
+the logs. New `tracing.py` mirrors `metrics.cost_scope`: a request-scoped `Trace` bound by a contextvar; the
+`/v1/analyze` route opens `trace_scope(analysis_id, …)` around the pipeline and wraps each stage in
+`span(name)`, which times the block and records `(name, duration_ms)` on the active trace. On exit the trace
+logs a summary line (a logfmt message plus the fields under a structured `extra`): `function`, `model_tier`,
+per-stage `*_ms`, total `duration_ms`, `llm_cost_usd`/`llm_calls` (from the U1 meter), `bugs`,
+`tests_generated`/`tests_run`, `fix_verified`. The `analysis_id` doubles as the trace id, correlating the
+log, the response, and the shareable `?run=` link. `config.log_format` ("text" default | "json") switches
+the formatter so the fields are machine-parseable for any aggregator. No external service; the emit is a
+single log call, so Langfuse or OTel is a drop-in later without touching the route.
+**Why:** for a single service, structured logs ARE full tracing — and they're the most *portable* choice: the
+same line ingests into Loki/Datadog/CloudWatch/ELK or even Langfuse, with zero infra or vendor lock-in. That
+is a stronger "best for the future" than wiring one tracing vendor (which couples us to a running service for
+a feature only the operator views). It reuses what U1–U3 already built (the cost meter, the per-stage
+boundaries, the `analysis_id`), so it is nearly free. The contextvar + `span` shape matches `cost_scope`, so
+the mechanism is already familiar. Emitting on scope exit (even on error) means a failed run still leaves a
+trace showing how far it got. JSON is opt-in so the dev console stays human-readable by default.

@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     app_name: str = "TypeWright"
     environment: str = "dev"
     log_level: str = "INFO"
+    # "text" (human-readable console, default) or "json" (structured, for a log aggregator — D54).
+    log_format: str = "text"
 
     # --- LLM / property detection (Phase 2) ---
     # Read from ANTHROPIC_API_KEY (no TYPEWRIGHT_ prefix) so the standard

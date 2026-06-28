@@ -157,8 +157,11 @@ Each step is one specific LLM call with structured output — not a free-form ag
   cost meter; an analysis that crosses it aborts with **402** (the fix step degrades instead). **Unit 3
   (D53) done:** rate limiting — per-IP on `/v1/analyze`, per-installation on the webhook (fixed-window,
   **429** + `Retry-After`), behind a `RateLimiter` seam with an in-memory default and a Redis-backed
-  backend flippable via `rate_limit_backend`. Still to come: tracing (U4), hardening edges (U5 — Kestrel
-  429 passthrough, code-size 422). *Exit: production-ready under load.*
+  backend flippable via `rate_limit_backend`. **Unit 4 (D54) done:** per-analysis tracing — `trace_scope` +
+  `span` emit one structured summary log per analysis (per-stage timeline + cost + bugs + duration,
+  correlated by `analysis_id`), with an optional `log_format=json` for aggregators and a seam keeping
+  Langfuse/OTel a drop-in. Still to come: hardening edges (U5 — Kestrel 429 passthrough, code-size 422).
+  *Exit: production-ready under load.*
 - **Phase 10 — Polish & launch.** Docs, acknowledgments, final demo.
 
 ## 5. API specification

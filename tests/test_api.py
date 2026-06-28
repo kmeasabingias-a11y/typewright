@@ -551,3 +551,12 @@ def test_rate_limited_returns_429(make_client):
     assert resp.status_code == 429
     assert resp.headers["retry-after"] == "42"
     assert resp.json()["retry_after"] == 42
+
+
+def test_analyze_emits_a_trace(client, caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="typewright"):
+        resp = client.post("/v1/analyze", json={"code": "def add(a, b):\n    return a + b"})
+    assert resp.status_code == 200
+    assert any("event=analysis_trace" in r.getMessage() for r in caplog.records)
