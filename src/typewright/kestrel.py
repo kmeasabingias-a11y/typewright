@@ -22,9 +22,21 @@ from dataclasses import dataclass
 import httpx
 
 from .config import Settings, get_settings
-from .errors import PipelineError
+from .errors import PipelineError, SandboxUnavailableError
 
 _STAGE = "sandbox_execution"
+# Kestrel statuses that mean "busy/down, retry" rather than "our request was bad" — surfaced as 503.
+_TRANSIENT_STATUSES = frozenset({429, 502, 503, 504})
+
+
+def _parse_retry_after(value: str | None) -> int | None:
+    """Parse a Retry-After header's seconds form; None if absent or an HTTP-date (not handled)."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -97,8 +109,19 @@ def run_in_sandbox(
                 "/execute",
                 json={"code": code, "timeout_seconds": timeout_seconds},
             )
-            response.raise_for_status()
-            payload = response.json()
+    except httpx.RequestError as exc:
+        # Couldn't reach Kestrel at all (connection refused, DNS, read timeout) -> the sandbox is
+        # unavailable, not a logic failure of ours. Surface as 503 so the caller can retry (D55).
+        raise SandboxUnavailableError(detail=f"Kestrel unreachable: {exc}") from exc
+
+    if response.status_code in _TRANSIENT_STATUSES:
+        raise SandboxUnavailableError(
+            retry_after=_parse_retry_after(response.headers.get("Retry-After")),
+            detail=f"Kestrel returned {response.status_code}",
+        )
+    try:
+        response.raise_for_status()
+        payload = response.json()
     except httpx.HTTPError as exc:
         raise PipelineError(_STAGE, f"Kestrel /execute failed: {exc}") from exc
     return SandboxResult.from_dict(payload)

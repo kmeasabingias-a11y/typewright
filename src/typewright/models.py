@@ -15,6 +15,9 @@ import enum
 from pydantic import BaseModel, Field
 
 
+MAX_CODE_CHARS = 100_000  # matches Kestrel's server-side cap; oversized -> 422 (D55)
+
+
 class ArgKind(str, enum.Enum):
     """How an argument is passed to the function."""
 
@@ -314,7 +317,11 @@ class AnalyzedFunction(BaseModel):
 class AnalyzeRequest(BaseModel):
     """Body of POST /v1/analyze."""
 
-    code: str = Field(..., description="Python source containing the function to analyze.")
+    code: str = Field(
+        ...,
+        max_length=MAX_CODE_CHARS,
+        description="Python source containing the function to analyze (capped at 100,000 chars).",
+    )
     function_name: str | None = Field(
         default=None,
         description=(

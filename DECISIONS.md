@@ -786,3 +786,20 @@ a feature only the operator views). It reuses what U1–U3 already built (the co
 boundaries, the `analysis_id`), so it is nearly free. The contextvar + `span` shape matches `cost_scope`, so
 the mechanism is already familiar. Emitting on scope exit (even on error) means a failed run still leaves a
 trace showing how far it got. JSON is opt-in so the dev console stays human-readable by default.
+
+### D55 — Hardening: sandbox-unavailable → 503 (not 500), and an up-front code-size cap → 422
+**Decision:** Two edges, closing the D37 forward-notes. (1) When the Kestrel call can't be served — a
+transport error (unreachable / connection refused / read timeout) or a **transient** HTTP status from Kestrel
+(**429 / 502 / 503 / 504**) — `kestrel.run_in_sandbox` now raises a new `SandboxUnavailableError(retry_after)`
+that maps to **503 Service Unavailable** (+ `Retry-After` when Kestrel sent one), instead of folding into a
+500. Any OTHER non-2xx (e.g. a 400/401/500 — an unexpected/our-side failure) stays a `PipelineError` → 500.
+(2) `AnalyzeRequest.code` gains `max_length=100_000` (matching Kestrel's server cap), so an oversized payload
+is rejected up front with **422** before it ever reaches an LLM call or the sandbox. The best-effort fix step
+(D44) also catches `SandboxUnavailableError` on its verification re-run → degrades the fix rather than
+503-ing the whole request.
+**Why:** "the sandbox is busy/down" is an availability problem, not a logic bug — 503 + Retry-After tells the
+caller "try again," which a 500 ("we broke") hides. Mapping Kestrel's 429 to our **503** (not a passthrough
+429) is deliberate: 429 is reserved for the caller's OWN rate limit (D53), and conflating the two would make
+"429" ambiguous. Capping `code` at the same 100k Kestrel enforces turns a guaranteed-to-fail run into a cheap
+422 (no wasted LLM spend), and pydantic gives it for free as a request-validation error. Degrading the fix on
+a verify-time sandbox outage mirrors D44: the analysis (`bugs_found`) is already valid.

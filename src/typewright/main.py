@@ -22,7 +22,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import Settings, get_settings
-from .errors import CostBudgetExceededError, PipelineError, RateLimitedError, SandboxTimeoutError, TypeWrightError
+from .errors import CostBudgetExceededError, PipelineError, RateLimitedError, SandboxTimeoutError, SandboxUnavailableError, TypeWrightError
 from .execution import run_tests
 from .fixgen import build_fix_file, finalize, suggest_fix
 from .generation import generate_strategies
@@ -179,7 +179,7 @@ def _maybe_suggest_fix(
             verify_result = run(fix_file, timeout_seconds=budget)
             if not verify_result.timed_out:
                 verify_report = parse_results(verify_result, properties)
-        except PipelineError as exc:
+        except (PipelineError, SandboxUnavailableError) as exc:
             logger.warning("fix verification inconclusive (sandbox failed): %s", exc)
     return finalize(proposed, verify_report)
 
@@ -216,6 +216,13 @@ def create_app() -> FastAPI:
         """
         logger.info("analyze timed out: %s", exc)
         return JSONResponse(status_code=504, content={"detail": str(exc)})
+    
+    @app.exception_handler(SandboxUnavailableError)
+    async def handle_sandbox_unavailable(request: Request, exc: SandboxUnavailableError) -> JSONResponse:
+        """Map an unreachable/overloaded sandbox to 503 Service Unavailable + Retry-After (D55)."""
+        logger.warning("sandbox unavailable: %s", exc)
+        headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after is not None else None
+        return JSONResponse(status_code=503, content={"detail": str(exc)}, headers=headers)
     
     @app.exception_handler(CostBudgetExceededError)
     async def handle_cost_budget(request: Request, exc: CostBudgetExceededError) -> JSONResponse:

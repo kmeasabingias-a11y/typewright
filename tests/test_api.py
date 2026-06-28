@@ -560,3 +560,20 @@ def test_analyze_emits_a_trace(client, caplog):
         resp = client.post("/v1/analyze", json={"code": "def add(a, b):\n    return a + b"})
     assert resp.status_code == 200
     assert any("event=analysis_trace" in r.getMessage() for r in caplog.records)
+
+
+def test_sandbox_unavailable_returns_503(make_client):
+    from typewright.errors import SandboxUnavailableError
+
+    def unavailable(test_file, *, timeout_seconds, settings=None):
+        raise SandboxUnavailableError(retry_after=5)
+
+    client = make_client(run=unavailable)
+    resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
+    assert resp.status_code == 503
+    assert resp.headers["retry-after"] == "5"
+
+
+def test_oversized_code_is_422(client):
+    resp = client.post("/v1/analyze", json={"code": "x" * 100_001})
+    assert resp.status_code == 422

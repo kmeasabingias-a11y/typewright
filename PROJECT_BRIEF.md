@@ -160,8 +160,10 @@ Each step is one specific LLM call with structured output — not a free-form ag
   backend flippable via `rate_limit_backend`. **Unit 4 (D54) done:** per-analysis tracing — `trace_scope` +
   `span` emit one structured summary log per analysis (per-stage timeline + cost + bugs + duration,
   correlated by `analysis_id`), with an optional `log_format=json` for aggregators and a seam keeping
-  Langfuse/OTel a drop-in. Still to come: hardening edges (U5 — Kestrel 429 passthrough, code-size 422).
-  *Exit: production-ready under load.*
+  Langfuse/OTel a drop-in. **Unit 5 (D55) done:** hardening edges — a Kestrel transport error or transient
+  status (429/502/503/504) now surfaces as **503** + `Retry-After` (a `SandboxUnavailableError`, not folded
+  into 500), and `code` is capped at 100k chars → **422** up front. ✅ **All 5 units done** — the cost,
+  rate, observability, and resilience controls are in place. *Exit: production-ready under load.*
 - **Phase 10 — Polish & launch.** Docs, acknowledgments, final demo.
 
 ## 5. API specification
@@ -227,7 +229,8 @@ honest-null rather than a fabricated count (D5/D40).
 **Status codes:** 200 (analysis complete; `bugs_found` may be empty) · 400 (code doesn't
 parse, or `function_name` not found) · **402 (exceeded the `max_cost_usd` budget — body carries
 `spent_usd`/`limit_usd`, D52)** · 429 (rate limit) · 500 (pipeline failure — body
-includes the failing `stage`) · 504 (exceeded `max_test_runtime_seconds`).
+includes the failing `stage`) · **503 (sandbox temporarily unavailable — `Retry-After`, D55)** ·
+504 (exceeded `max_test_runtime_seconds`). `code` is capped at 100,000 chars (→ 422, D55).
 
 `max_cost_usd` (optional request field, Phase 9 D52) is the per-analysis LLM-cost ceiling in USD;
 it can only **lower** the server's configured cap (`min(request, config)`), and crossing it aborts

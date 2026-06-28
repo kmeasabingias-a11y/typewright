@@ -80,6 +80,23 @@ class SandboxTimeoutError(Exception):
         super().__init__(f"Test execution exceeded the {budget_seconds}s time budget.")
 
 
+class SandboxUnavailableError(Exception):
+    """Kestrel couldn't serve the run right now — mapped to 503 (Phase 9, D55).
+
+    Distinct from ``PipelineError`` (a logic failure -> 500): the sandbox is unreachable or temporarily
+    overloaded (a transport error, or a 429/502/503/504 from Kestrel), so the right answer is "try again
+    later," not "we broke." Carries an optional ``retry_after`` (seconds) for the 503's Retry-After header.
+    """
+
+    def __init__(self, retry_after: int | None = None, detail: str = "") -> None:
+        self.retry_after = retry_after
+        self.detail = detail
+        msg = "Sandbox temporarily unavailable"
+        if detail:
+            msg += f": {detail}"
+        super().__init__(msg)
+
+
 class CostBudgetExceededError(Exception):
     """An analysis hit its LLM-cost ceiling — mapped to 402 (Phase 9, D52).
 

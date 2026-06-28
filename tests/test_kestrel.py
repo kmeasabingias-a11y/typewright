@@ -12,7 +12,7 @@ import pytest
 
 from typewright import kestrel
 from typewright.config import Settings
-from typewright.errors import PipelineError
+from typewright.errors import PipelineError, SandboxUnavailableError
 from typewright.kestrel import SandboxResult
 
 _OK_PAYLOAD = {
@@ -110,3 +110,22 @@ def test_http_timeout_is_run_budget_plus_buffer(monkeypatch):
     )
 
     assert captured["timeout"] == 45.0
+
+
+def test_transient_status_is_sandbox_unavailable(monkeypatch):
+    def handler(request):
+        return httpx.Response(503, headers={"Retry-After": "7"}, json={"detail": "busy"})
+
+    monkeypatch.setattr(kestrel, "_client", lambda settings, timeout: _mock_client(handler))
+    with pytest.raises(SandboxUnavailableError) as excinfo:
+        kestrel.run_in_sandbox("...", timeout_seconds=1.0, settings=_settings())
+    assert excinfo.value.retry_after == 7
+
+
+def test_transport_error_is_sandbox_unavailable(monkeypatch):
+    def handler(request):
+        raise httpx.ConnectError("refused", request=request)
+
+    monkeypatch.setattr(kestrel, "_client", lambda settings, timeout: _mock_client(handler))
+    with pytest.raises(SandboxUnavailableError):
+        kestrel.run_in_sandbox("...", timeout_seconds=1.0, settings=_settings())
