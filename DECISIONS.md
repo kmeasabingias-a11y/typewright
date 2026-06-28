@@ -679,3 +679,26 @@ function and sees bugs in ~60s") needs neither storage nor a separate frontend, 
 (`INDEX_HTML` is a *raw* triple-quoted literal so the page's JS escapes survive verbatim; the example
 function's `"""` docstring is assembled in JS from single double-quote characters so that three
 double-quotes never appear in the source and close the literal early.)
+
+### D50 — Shareable links: best-effort persistence of each run as a JSON blob in SQLite, behind a swappable seam
+**Decision:** A completed analysis is saved so it can be fetched later by `analysis_id` (the brief's
+`GET /v1/runs/{id}`). New `store.py` defines a small `RunStore` protocol (`save(response)` /
+`load(id) -> AnalyzeResponse | None`) with two implementations: `SqliteRunStore` (the real one — stdlib
+`sqlite3`, a single-file DB, one short-lived connection per call so it is safe under FastAPI's threadpool,
+WAL mode; one row per run = `analysis_id` PK + UTC `created_at` + the full `AnalyzeResponse` as a JSON
+`body`) and `InMemoryRunStore` (a dict — the test/dev fake). `POST /v1/analyze` saves the response through
+a new `get_run_store` dependency seam **best-effort** — a `store.save` failure is logged and swallowed,
+never failing the already-valid analysis (the D44 lesson). `GET /v1/runs/{analysis_id}` returns the stored
+response, or **404** (`HTTPException`) on an unknown/expired id. New config `runs_db_path` (default
+`runs.db`; point at a mounted volume in a container so links survive a redeploy). No eviction yet —
+`created_at` is recorded for a future TTL/cleanup pass.
+**Why:** SQLite is the lightest thing that *durably* backs shareable links — stdlib (no new dependency),
+no service, no compose change — so it honors the project's "add infra only when a feature needs it" rule
+(D1/D12) better than standing up Postgres or reusing the worker's Redis (whose default is in-memory, so
+links would die on redeploy). The `RunStore` protocol keeps the choice swappable: Postgres can drop in for
+a Phase-9 multi-replica deploy with no route change. Storing the whole response as one JSON blob (over a
+normalized schema) makes the read path a single row → `model_validate_json`, and the stored shape tracks
+`AnalyzeResponse` automatically as it evolves. Persistence is best-effort for the same reason the fix step
+is (D44): the analysis is the value; a storage hiccup must degrade the *link*, not the result. A lookup
+miss is a plain 404 — neither a caller-input error (400) nor a pipeline failure (500) — so it needs no
+domain-error type.

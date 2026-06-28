@@ -33,3 +33,8 @@ TypeWright_Project_Brief.pdf
 
 # GitHub App private key — never commit
 *.pem
+
+# Phase 8 web-demo run store (local SQLite)
+runs.db
+runs.db-wal
+runs.db-shm

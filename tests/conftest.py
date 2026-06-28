@@ -9,6 +9,7 @@ from typewright.main import (
     get_generate_strategies,
     get_generate_test_file,
     get_infer_properties,
+    get_run_store,
     get_run_tests,
     get_suggest_fix,
 )
@@ -21,6 +22,7 @@ from typewright.models import (
     PropertyClass,
     StrategyPlan,
 )
+from typewright.store import InMemoryRunStore
 
 # Fixed results the default fakes return, so API tests never hit a real LLM or a live
 # Kestrel (all four steps — detection, generation, test generation, sandbox execution —
@@ -116,17 +118,19 @@ def make_client():
         gen_tests=_default_testgen,
         run=_default_run,
         suggest=_default_suggest,
+        store=None,
     ) -> TestClient:
+        run_store = store if store is not None else InMemoryRunStore()
         app = create_app()
         app.dependency_overrides[get_infer_properties] = lambda: infer
         app.dependency_overrides[get_generate_strategies] = lambda: gen
         app.dependency_overrides[get_generate_test_file] = lambda: gen_tests
         app.dependency_overrides[get_run_tests] = lambda: run
         app.dependency_overrides[get_suggest_fix] = lambda: suggest
+        app.dependency_overrides[get_run_store] = lambda: run_store
         client = TestClient(app)
         clients.append(client)
         return client
-
     yield _make
     for client in clients:
         client.close()

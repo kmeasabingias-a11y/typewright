@@ -460,3 +460,31 @@ def test_pipeline_failure_is_500_with_stage(make_client):
     body = resp.json()
     assert body["stage"] == "property_detection"
     assert "property_detection" in body["detail"]
+
+
+def test_analyze_persists_run_and_it_is_fetchable(client):
+    code = "def add(a: int, b: int) -> int:\n    return a + b"
+    posted = client.post("/v1/analyze", json={"code": code})
+    assert posted.status_code == 200
+    rid = posted.json()["analysis_id"]
+
+    got = client.get(f"/v1/runs/{rid}")
+    assert got.status_code == 200
+    assert got.json() == posted.json()
+
+
+def test_get_unknown_run_is_404(client):
+    assert client.get("/v1/runs/does-not-exist").status_code == 404
+
+
+def test_persist_failure_does_not_fail_analysis(make_client):
+    class BoomStore:
+        def save(self, response):
+            raise RuntimeError("disk full")
+
+        def load(self, analysis_id):
+            return None
+
+    client = make_client(store=BoomStore())
+    resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
+    assert resp.status_code == 200  # best-effort: a save failure must not sink the analysis

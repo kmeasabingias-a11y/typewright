@@ -145,8 +145,9 @@ Each step is one specific LLM call with structured output — not a free-form ag
 - **Phase 8 — Web Demo.** 🔄 In progress. A single self-contained page (inline CSS + vanilla JS, no
   build step, no external assets) served at `GET /` by the API itself (D49), POSTing to `POST /v1/analyze`
   on the same origin with `include_fix_suggestion` — it renders the detected properties, each failing
-  input, and the verified fix. Shareable links (`GET /v1/runs/{id}`) + storage and per-IP rate-limiting
-  are deferred (Phase 9 owns limits). *Exit: public URL; a recruiter pastes a function and sees bugs in ~60s.*
+  input, and the verified fix. Unit 2 (D50) persists each run to SQLite and adds `GET /v1/runs/{id}` for
+  shareable links; per-IP rate-limiting is deferred (Phase 9 owns limits). *Exit: public URL; a recruiter
+  pastes a function and sees bugs in ~60s.*
 - **Phase 9 — Observability, Cost Controls, Hardening.** Full tracing, per-install rate
   limits, per-function cost budget. *Exit: production-ready under load.*
 - **Phase 10 — Polish & launch.** Docs, acknowledgments, final demo.
@@ -217,7 +218,8 @@ includes the failing `stage`) · 504 (exceeded `max_test_runtime_seconds`).
   signature). A separate worker analyzes the PR's changed functions and comments (D46/D48).
 - `GET /` (public) — the web demo: a self-contained paste-a-function page that POSTs to `POST /v1/analyze`
   and renders the bugs + a verified fix (Phase 8, D49).
-- `GET /v1/runs/{analysis_id}` (public) — fetch a previous analysis (shareable links). *(Deferred; not yet built.)*
+- `GET /v1/runs/{analysis_id}` (public) — fetch a previous analysis by id (shareable links); **200** or
+  **404**. Each `POST /v1/analyze` run is persisted best-effort to SQLite behind a `RunStore` seam (Phase 8, D50).
 - **Auth:** web demo unauthenticated + rate-limited per IP; GitHub App uses GitHub's JWT;
   future API consumers use an API key.
 

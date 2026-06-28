@@ -15,9 +15,10 @@ fully-configured instance, while ``app`` at module scope is what ``uvicorn`` ser
 import json
 import logging
 import uuid
+from functools import lru_cache
 from typing import Awaitable, Callable
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import Settings, get_settings
@@ -43,6 +44,7 @@ from .models import (
 )
 from .parser import parse_function
 from .results import parse_results
+from .store import RunStore, SqliteRunStore
 from .testgen import generate_test_file
 from .web import INDEX_HTML
 from .webhook import parse_pull_request_event, verify_signature
@@ -92,6 +94,21 @@ def get_enqueue() -> Callable[[PullRequestJob], Awaitable[None]]:
     (``typewright.worker.enqueue``), and a separate worker process runs the analysis.
     """
     return worker_enqueue
+
+
+@lru_cache
+def _default_run_store() -> SqliteRunStore:
+    """Build the process-wide SQLite run store from settings (created once)."""
+    return SqliteRunStore(get_settings().runs_db_path)
+
+
+def get_run_store() -> RunStore:
+    """Dependency provider for the run store (test seam, D50).
+
+    Production returns a process-wide ``SqliteRunStore``; tests override this with an
+    ``InMemoryRunStore`` so persistence is exercised with no disk.
+    """
+    return _default_run_store()
 
 
 def _maybe_suggest_fix(
@@ -232,6 +249,7 @@ def create_app() -> FastAPI:
         gen_tests: Callable[..., GeneratedTestFile] = Depends(get_generate_test_file),
         run: Callable[..., SandboxResult] = Depends(get_run_tests),
         suggest: Callable[..., ProposedFix] = Depends(get_suggest_fix),
+        store: RunStore = Depends(get_run_store),
         settings: Settings = Depends(get_settings),
     ) -> AnalyzeResponse:
         """Parse → detect → strategies → tests → run in the sandbox → optional fix (Phase 6).
@@ -271,7 +289,7 @@ def create_app() -> FastAPI:
             len(report.bugs),
             "" if fix_suggestion is None else f", fix verified={fix_suggestion.verified}",
         )
-        return AnalyzeResponse(
+        response = AnalyzeResponse(
             analysis_id=str(uuid.uuid4()),
             function=AnalyzedFunction.from_metadata(metadata),
             properties=properties,
@@ -280,6 +298,28 @@ def create_app() -> FastAPI:
             bugs_found=report.bugs,
             fix_suggestion=fix_suggestion,
         )
+        try:
+            store.save(response)
+        except Exception:  # best-effort: a store failure must not sink a valid analysis (D44/D50)
+            logger.warning("failed to persist run %s", response.analysis_id, exc_info=True)
+        return response
+    
+
+    @app.get("/v1/runs/{analysis_id}", response_model=AnalyzeResponse)
+    def get_run(
+        analysis_id: str,
+        store: RunStore = Depends(get_run_store),
+    ) -> AnalyzeResponse:
+        """Fetch a previously-run analysis by id — the shareable-link read path (Phase 8, D50).
+
+        Returns the stored ``AnalyzeResponse`` as-is, or **404** when the id is unknown (expired or
+        never existed). A miss is a plain ``HTTPException`` — not a caller-input error (400) and not a
+        pipeline failure (500), so it needs no domain-error type.
+        """
+        run = store.load(analysis_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        return run
 
     return app
 

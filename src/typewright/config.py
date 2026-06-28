@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     github_app_private_key_path: str | None = None
     # arq job queue (Phase 7, D46): Redis between the webhook and the background worker.
     redis_url: str = "redis://localhost:6379"
+    # --- Web demo run store (Phase 8, D50) ---
+    # SQLite file backing GET /v1/runs/{id} (shareable links). A single-file DB needs no service;
+    # in a container point this at a mounted volume so links survive a redeploy.
+    runs_db_path: str = "runs.db"
 
     def model_for_tier(self, tier: str) -> str:
         """Resolve a request's ``model_tier`` to a concrete model string.
