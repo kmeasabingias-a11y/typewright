@@ -12,8 +12,11 @@
 > produced a verified fix for **4/4** detected golden-set bugs (100%, > the ~60% exit bar) with no false
 > positive on the correct control. **Phases 1–7 complete.** The GitHub App (webhook → arq/Redis queue →
 worker → diff → per-function analysis → one PR comment; D46–D48) was verified live: a real PR adding a buggy
-`absolute` got a bot comment in ~24s with both property violations *and* a **verified** fix. Phase 8 (web
-demo) is next.
+`absolute` got a bot comment in ~24s with both property violations *and* a **verified** fix. **Phase 8 (web
+demo) is in progress** — Unit 1 (the paste-a-function UI) is a single self-contained page served at `GET /`
+by the API itself (inline CSS + vanilla JS, no build step, D49), POSTing to `/v1/analyze` with
+`include_fix_suggestion` on the same origin; it meets the exit criterion. Shareable links + storage and
+per-IP rate-limiting are deferred (Phase 9 owns limits).
 
 ## 1. The goal
 
@@ -139,8 +142,11 @@ Each step is one specific LLM call with structured output — not a free-form ag
   Postgres deferred (installation tokens are minted on demand; D1). *Exit: install on a test repo, open a
   buggy PR, see a comment within 2 min.* ✅ met — live: a buggy `absolute` PR got a `[bot]` comment with 2
   property violations + a verified fix in ~24s of analysis.
-- **Phase 8 — Web Demo.** Paste-a-function UI using the same engine. *Exit: public URL; a
-  recruiter pastes a function and sees bugs in ~60s.*
+- **Phase 8 — Web Demo.** 🔄 In progress. A single self-contained page (inline CSS + vanilla JS, no
+  build step, no external assets) served at `GET /` by the API itself (D49), POSTing to `POST /v1/analyze`
+  on the same origin with `include_fix_suggestion` — it renders the detected properties, each failing
+  input, and the verified fix. Shareable links (`GET /v1/runs/{id}`) + storage and per-IP rate-limiting
+  are deferred (Phase 9 owns limits). *Exit: public URL; a recruiter pastes a function and sees bugs in ~60s.*
 - **Phase 9 — Observability, Cost Controls, Hardening.** Full tracing, per-install rate
   limits, per-function cost budget. *Exit: production-ready under load.*
 - **Phase 10 — Polish & launch.** Docs, acknowledgments, final demo.
@@ -209,7 +215,9 @@ includes the failing `stage`) · 504 (exceeded `max_test_runtime_seconds`).
 - `POST /webhook/github` (internal) — GitHub `pull_request` events; HMAC-SHA256 signature-validated on
   the raw body (D47); **202** with the work enqueued onto arq/Redis (200 for ignored events, 403 bad
   signature). A separate worker analyzes the PR's changed functions and comments (D46/D48).
-- `GET /v1/runs/{analysis_id}` (public) — fetch a previous analysis (shareable links).
+- `GET /` (public) — the web demo: a self-contained paste-a-function page that POSTs to `POST /v1/analyze`
+  and renders the bugs + a verified fix (Phase 8, D49).
+- `GET /v1/runs/{analysis_id}` (public) — fetch a previous analysis (shareable links). *(Deferred; not yet built.)*
 - **Auth:** web demo unauthenticated + rate-limited per IP; GitHub App uses GitHub's JWT;
   future API consumers use an API key.
 

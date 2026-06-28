@@ -18,7 +18,7 @@ import uuid
 from typing import Awaitable, Callable
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import Settings, get_settings
 from .errors import PipelineError, SandboxTimeoutError, TypeWrightError
@@ -44,6 +44,7 @@ from .models import (
 from .parser import parse_function
 from .results import parse_results
 from .testgen import generate_test_file
+from .web import INDEX_HTML
 from .webhook import parse_pull_request_event, verify_signature
 from .worker import enqueue as worker_enqueue
 
@@ -168,6 +169,18 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         """Liveness probe: returns 200 as long as the process is serving."""
         return {"status": "ok"}
+    
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    def index() -> str:
+        """Serve the Phase 8 web demo: a self-contained paste-a-function page (D49).
+
+        One static HTML document (inline CSS + vanilla JS, no build step, no external assets)
+        that POSTs to ``POST /v1/analyze`` on this same origin with ``include_fix_suggestion``
+        set, and renders the detected properties, the failing inputs, and the verified fix. It
+        is served as a module constant so it ships in the wheel/image with no static-asset
+        packaging (D49); excluded from the OpenAPI schema since it is a page, not an API.
+        """
+        return INDEX_HTML
     
     @app.post("/webhook/github")
     async def github_webhook(

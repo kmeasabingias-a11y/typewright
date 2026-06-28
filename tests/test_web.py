@@ -1,0 +1,22 @@
+"""Tests for the Phase 8 web demo page (GET /, D49)."""
+
+from fastapi.testclient import TestClient
+
+from typewright.main import create_app
+
+
+def test_index_is_served_as_html():
+    """GET / returns the demo page as HTML (no auth, no pipeline deps)."""
+    client = TestClient(create_app())
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+
+
+def test_index_wires_to_the_real_endpoint():
+    """The page must call the real endpoint, opt into a fix, and expose its controls."""
+    body = TestClient(create_app()).get("/").text
+    assert "/v1/analyze" in body
+    assert "include_fix_suggestion" in body
+    assert 'id="code"' in body
+    assert 'id="analyze"' in body

@@ -656,3 +656,26 @@ identical (MockTransport, no network). Sync throughout (with the worker offloadi
 sync/async pipeline rewrite. Splitting "which lines changed" (pure patch parsing) from "which functions changed"
 (AST intersection) keeps both unit-testable on plain strings and reuses the parser we already trust. A
 file-path private key sidesteps multi-line-PEM-in-env pain and matches how GitHub hands you the `.pem`.
+
+## Phase 8 — Web Demo
+
+### D49 — Web demo: one self-contained page served by the API itself; no separate frontend, no new storage
+**Decision:** Phase 8's demo is a SINGLE static HTML document — inline CSS + vanilla JS, no build step,
+no external assets — held as the `INDEX_HTML` constant in a new `web.py` and served at **`GET /`**
+(`response_class=HTMLResponse`, `include_in_schema=False`). The page POSTs to the existing
+`POST /v1/analyze` on the **same origin** (so there is no CORS to configure) with
+`include_fix_suggestion: true`, then renders the detected properties, each bug's failing input +
+severity, and the collapsible **verified** fix (carrying the "AI suggestion — review carefully"
+disclaimer). It pre-fills a buggy `absolute` so the page finds a real bug on the first click, and
+degrades every non-200 (400 / 422 / 429 / 500-with-stage / 504 / network) into a readable line rather
+than a blank screen. **Shareable links (`GET /v1/runs/{id}`) + a storage backend are deferred**, and
+**per-IP rate-limiting is deferred to Phase 9** (which already owns limits/hardening).
+**Why:** the engine is already a clean HTTP API, so the demo only needs a face on it. A same-origin
+static page reuses that API verbatim — no second service, no Node toolchain, no CORS, no repo split —
+and ships inside the existing wheel/image because it is a Python module constant (no static-asset
+packaging or path concern). Choosing this over standing up Next.js or Postgres honors the project's
+"add infra only when a feature needs it" rule (D1/D12): the exit criterion ("a recruiter pastes a
+function and sees bugs in ~60s") needs neither storage nor a separate frontend, so neither is added.
+(`INDEX_HTML` is a *raw* triple-quoted literal so the page's JS escapes survive verbatim; the example
+function's `"""` docstring is assembled in JS from single double-quote characters so that three
+double-quotes never appear in the source and close the literal early.)
