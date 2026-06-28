@@ -38,6 +38,7 @@ def complete(
     model: str,
     response_model: type[T],
     messages: list[dict[str, str]],
+    max_tokens: int | None = None,
 ) -> T:
     """Run one structured Instructor completion, the way every analysis stage does (D31).
 
@@ -58,7 +59,7 @@ def complete(
         response_model=response_model,
         api_key=settings.anthropic_api_key,
         max_retries=settings.llm_max_retries,
-        max_tokens=settings.llm_max_tokens,
+        max_tokens=settings.llm_max_tokens if max_tokens is None else max_tokens,
         temperature=settings.llm_temperature,
         timeout=settings.llm_timeout_seconds,
         messages=messages,

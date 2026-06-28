@@ -803,3 +803,16 @@ caller "try again," which a 500 ("we broke") hides. Mapping Kestrel's 429 to our
 "429" ambiguous. Capping `code` at the same 100k Kestrel enforces turns a guaranteed-to-fail run into a cheap
 422 (no wasted LLM spend), and pydantic gives it for free as a request-validation error. Degrading the fix on
 a verify-time sandbox outage mirrors D44: the analysis (`bugs_found`) is already valid.
+
+### D56 — Per-stage LLM token budgets (detection/strategy small, testgen/fixgen larger)
+**Decision:** `llm.complete` gains an optional `max_tokens` override (falling back to
+`settings.llm_max_tokens`). The base `llm_max_tokens` is raised to 2048 (detection/strategy emit short
+structured lists), and a new `llm_max_tokens_codegen` (4096) is passed by `testgen` and `fixgen`, which
+**emit code** (several `@given` test functions, or a corrected function) and need the room.
+**Why:** found by testing on real code — `inflection.underscore` 500'd at the test-generation stage with
+"output incomplete due to a max_tokens length limit." The single `llm_max_tokens=1024`, sized for the small
+property-detection output, was shared by every stage and truncated test generation on a property-rich
+function (Instructor then failed the reask → `PipelineError` → 500). A `max_tokens` cap is a *ceiling, not a
+cost* — you pay per token actually generated — so raising it is free insurance against truncation; splitting
+it per stage keeps detection cheap-by-intent while giving the code-emitting stages headroom. Makes testgen
+robust on non-trivial real-world functions (and the PR bot more reliable).

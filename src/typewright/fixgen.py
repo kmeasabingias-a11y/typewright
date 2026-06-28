@@ -120,6 +120,7 @@ def suggest_fix(
         settings=settings,
         model=model,
         response_model=ProposedFix,
+        max_tokens=settings.llm_max_tokens_codegen,
         messages=[
             {"role": "system", "content": _SYSTEM_PROMPT + "\n\n" + _FEW_SHOT},
             {"role": "user", "content": user_prompt},

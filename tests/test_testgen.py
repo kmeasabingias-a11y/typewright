@@ -98,6 +98,7 @@ def test_generate_test_file_assembles_runnable_file(monkeypatch):
     assert fake.kwargs["model"] == settings.model_standard  # default tier
     assert fake.kwargs["response_model"] is GeneratedTests
     assert fake.kwargs["temperature"] == settings.llm_temperature
+    assert fake.kwargs["max_tokens"] == settings.llm_max_tokens_codegen
 
 
 def test_generated_file_is_collectable_and_passes(monkeypatch):

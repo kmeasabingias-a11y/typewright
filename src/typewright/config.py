@@ -46,7 +46,9 @@ class Settings(BaseSettings):
 
     llm_timeout_seconds: float = 30.0
     llm_max_retries: int = 2      # Instructor reask attempts on invalid output
-    llm_max_tokens: int = 1024    # detected-property lists are small
+    llm_max_tokens: int = 2048
+    llm_max_tokens_codegen: int = 4096
+        # detected-property lists are small
     llm_temperature: float = 0.0  # deterministic detection; low temp curbs fabrication
 
 
