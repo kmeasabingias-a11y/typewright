@@ -75,8 +75,12 @@ details.fix pre { background: #0b0d12; border: 1px solid var(--line); border-rad
     padding: 12px; overflow: auto; }
 details.fix pre code { background: none; padding: 0; }
 .disclaimer { color: var(--warn); font-size: 12.5px; }
-footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 20px 36px; max-width: 640px;
-margin: 0 auto; }
+#share { margin-top: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#share:empty { display: none; }
+.share-label { color: var(--muted); font-size: 13px; }
+#share code { font-size: 12.5px; word-break: break-all; }
+#share button { padding: 5px 12px; font-size: 12px; }
+footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 20px 36px; max-width: 640px; margin: 0 auto; }
 </style>
 </head>
 <body>
@@ -110,6 +114,7 @@ margin: 0 auto; }
     </div>
     <div id="error"></div>
     </div>
+    <div id="share"></div>
     <div id="results"></div>
 </main>
 <footer>TypeWright finds silent wrong-answer bugs by checking implementation-independent
@@ -229,6 +234,7 @@ try {
     try { data = await res.json(); } catch (e) { data = {}; }
     if (!res.ok) { showError(res.status, data); return; }
     render(data);
+    showShareBar(data.analysis_id);
 } catch (e) {
     $('error').textContent = 'Network error: ' + e.message;
 } finally {
@@ -236,9 +242,57 @@ try {
 }
 }
 
+function shareUrl(id) {
+return location.origin + location.pathname + '?run=' + encodeURIComponent(id);
+}
+
+function showShareBar(id) {
+const url = shareUrl(id);
+$('share').innerHTML =
+    '<span class="share-label">🔗 Shareable link</span>' +
+    '<code id="share-url">' + esc(url) + '</code>' +
+    '<button id="copy-link" type="button">Copy</button>';
+$('copy-link').addEventListener('click', () => {
+    navigator.clipboard.writeText(url).then(() => {
+    $('copy-link').textContent = 'Copied!';
+    setTimeout(() => { $('copy-link').textContent = 'Copy'; }, 1500);
+    }).catch(() => {
+    const range = document.createRange();
+    range.selectNode($('share-url'));
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+    });
+});
+}
+
+async function loadShared(id) {
+$('results').innerHTML = '<div class="summary">Loading shared result…</div>';
+try {
+    const res = await fetch('/v1/runs/' + encodeURIComponent(id));
+    let data;
+    try { data = await res.json(); } catch (e) { data = {}; }
+    if (res.status === 404) {
+    $('results').innerHTML = '';
+    $('error').textContent = 'This shared result was not found (it may have expired).';
+    return;
+    }
+    if (!res.ok) { $('results').innerHTML = ''; showError(res.status, data); return; }
+    render(data);
+    showShareBar(id);
+} catch (e) {
+    $('results').innerHTML = '';
+    $('error').textContent = 'Network error: ' + e.message;
+}
+}
+
 window.addEventListener('DOMContentLoaded', () => {
-$('code').value = EXAMPLE;
 $('analyze').addEventListener('click', run);
+const sharedId = new URLSearchParams(location.search).get('run');
+if (sharedId) {
+    loadShared(sharedId);
+} else {
+    $('code').value = EXAMPLE;
+}
 });
 </script>
 </body>

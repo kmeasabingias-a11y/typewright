@@ -20,3 +20,10 @@ def test_index_wires_to_the_real_endpoint():
     assert "include_fix_suggestion" in body
     assert 'id="code"' in body
     assert 'id="analyze"' in body
+
+
+def test_index_supports_shared_links():
+    """The page can load a shared result (GET /v1/runs/) and offers a share bar."""
+    body = TestClient(create_app()).get("/").text
+    assert "/v1/runs/" in body
+    assert 'id="share"' in body
