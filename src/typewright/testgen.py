@@ -23,6 +23,8 @@ file that will not parse, becomes a ``PipelineError`` (stage "test_generation", 
 from __future__ import annotations
 
 import ast
+import builtins
+import symtable
 
 import instructor
 
@@ -125,6 +127,80 @@ def _assemble(meta: FunctionMetadata, plan: StrategyPlan, tests: GeneratedTests)
     blocks += [fn.strip() for fn in tests.test_functions if fn.strip()]
     return "\n\n\n".join(blocks) + "\n"
 
+_BUILTIN_NAMES = frozenset(dir(builtins))
+
+
+def _func_name(src: str) -> str | None:
+    """The name of the first top-level function in a test-function source string."""
+    try:
+        for node in ast.parse(src).body:
+            if isinstance(node, ast.FunctionDef):
+                return node.name
+    except SyntaxError:
+        return None
+    return None
+
+
+def _unresolved_names(table: symtable.SymbolTable, module_names: set[str]) -> set[str]:
+    """Names referenced (not assigned) in this scope or any nested scope that resolve to global
+    but are defined neither at module level nor as a builtin — i.e. undefined references."""
+    found: set[str] = set()
+    for sym in table.get_symbols():
+        name = sym.get_name()
+        if (
+            sym.is_global()
+            and sym.is_referenced()
+            and not sym.is_assigned()
+            and name not in module_names
+            and name not in _BUILTIN_NAMES
+        ):
+            found.add(name)
+    for child in table.get_children():
+        found |= _unresolved_names(child, module_names)
+    return found
+
+def _tests_with_undefined_names(source: str) -> dict[str, set[str]]:
+    """Map each ``test_*`` function in the assembled module to the undefined names it references."""
+    try:
+        top = symtable.symtable(source, "<typewright-tests>", "exec")
+    except SyntaxError:
+        return {}  # let the normal ast.parse gate raise a PipelineError
+    module_names = set(top.get_identifiers())
+    result: dict[str, set[str]] = {}
+    for child in top.get_children():
+        if child.get_type() == "function" and child.get_name().startswith("test_"):
+            undef = _unresolved_names(child, module_names)
+            if undef:
+                result[child.get_name()] = undef
+    return result
+
+
+def _drop_unresolved_tests(
+    meta: FunctionMetadata, plan: StrategyPlan, tests: GeneratedTests
+) -> GeneratedTests:
+    """Drop generated tests that reference an undefined name (D57). A hallucinated companion/helper
+    (e.g. a round-trip calling an inverse not in the snippet) would crash with NameError and surface
+    as a phantom bug; dropping it before assembly removes that false-positive class. Dropped tests are
+    recorded in ``skipped``. Skipped entirely when a star-import makes name resolution unreliable."""
+    if any("import *" in imp for imp in (*plan.extra_imports, *tests.extra_imports)):
+        return tests
+    bad = _tests_with_undefined_names(_assemble(meta, plan, tests))
+    if not bad:
+        return tests
+    kept: list[str] = []
+    skipped = list(tests.skipped)
+    for fn in tests.test_functions:
+        name = _func_name(fn)
+        if name in bad:
+            skipped.append(
+                f"{name}: dropped — references undefined name(s): {', '.join(sorted(bad[name]))}"
+            )
+        else:
+            kept.append(fn)
+    return GeneratedTests(
+        test_functions=kept, extra_imports=list(tests.extra_imports), skipped=skipped
+    )
+
 
 def generate_test_file(
     meta: FunctionMetadata,
@@ -174,6 +250,7 @@ def generate_test_file(
         ],
     )
 
+    tests = _drop_unresolved_tests(meta, plan, tests)
     source = _assemble(meta, plan, tests)
     try:
         tree = ast.parse(source)

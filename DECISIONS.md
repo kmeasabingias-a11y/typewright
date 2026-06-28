@@ -816,3 +816,23 @@ function (Instructor then failed the reask → `PipelineError` → 500). A `max_
 cost* — you pay per token actually generated — so raising it is free insurance against truncation; splitting
 it per stage keeps detection cheap-by-intent while giving the code-emitting stages headroom. Makes testgen
 robust on non-trivial real-world functions (and the PR bot more reliable).
+
+### D57 — Precision hardening: drop tests with undefined names; disclaim inferred-property violations
+**Decision:** Two precision measures, found by testing on real code (the `slugify`/`ß` case). (1) `testgen`
+now **drops any generated test that references an undefined name** — a deterministic `symtable` pass over the
+assembled module flags a test function whose body references a global that isn't defined at module level (the
+function under test, the imports) and isn't a builtin; such tests go to `skipped` instead of into the file.
+This kills the *crash* false-positive class outright: a hallucinated companion/helper (e.g. a round-trip
+calling an inverse not in the snippet) can never run and surface as a phantom `NameError` crash. (2) The
+comment and web outputs now carry an **inferred-property disclaimer** when bugs are shown — "these are
+violations of AI-inferred properties; confirm each is one the function is meant to guarantee" — because some
+inferred relations are over-strict.
+**Why — and what we deliberately did NOT do:** the obvious idea was confidence-gating (surface low-confidence
+violations as "possible issue"). Testing killed it: the bogus metamorphic `slugify(s) == slugify(s.upper())`
+was emitted at **0.90 confidence — the same class and confidence as the genuine `absolute(x) == absolute(-x)`
+bug.** Confidence can't separate a true inferred property from a confidently-wrong one; gating would either
+hide real bugs or keep the phantom. That over-inference is the documented §8-risk-2 precision limit of
+LLM-inferred property testing — not something a cheap oracle eliminates — so the honest move is to (a)
+hard-guard the part that IS deterministic (an undefined name is objectively a broken test, never a bug) and
+(b) frame the rest honestly (let the human judge whether the inferred property is intended) rather than
+pretend a gate makes it reliable.

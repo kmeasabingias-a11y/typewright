@@ -68,3 +68,15 @@ def test_multiple_functions_counted():
         ]
     )
     assert "found 3 issue(s) in 2 function(s)" in out
+
+
+def test_comment_includes_inferred_property_disclaimer():
+    from typewright.comment import format_comment
+    from typewright.models import Bug, BugSeverity, FunctionFinding
+
+    finding = FunctionFinding(
+        function_name="f",
+        bugs=[Bug(test_name="test_x", failing_input="x=1", error="AssertionError",
+                violated_property="f(x) == x", severity=BugSeverity.PROPERTY_VIOLATION)],
+    )
+    assert "AI-inferred" in format_comment([finding])

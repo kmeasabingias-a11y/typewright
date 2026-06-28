@@ -169,6 +169,10 @@ out.push(
     '</div>'
 );
 
+if (bugs.length) {
+    out.push('<div class="disclaimer">⚠️ Findings are violations of AI-inferred properties — confirm each is one your function is meant to guarantee.</div>');
+}
+
 const props = (data.properties && data.properties.detected) || [];
 if (props.length) {
     out.push('<div><h3>Properties checked</h3><ul class="props">');

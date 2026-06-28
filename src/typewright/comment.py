@@ -19,6 +19,11 @@ _SEVERITY_LABEL = {
     BugSeverity.PROPERTY_VIOLATION: "⚠️ wrong result",
 }
 
+_INFERRED_DISCLAIMER = (
+    "> ⚠️ _Findings are violations of **AI-inferred** properties — confirm each is one this function "
+    "is actually meant to guarantee before treating it as a bug._"
+)
+
 
 def _format_bug(bug) -> str:
     sev = _SEVERITY_LABEL.get(bug.severity, bug.severity.value)
@@ -56,4 +61,5 @@ def format_comment(findings: list[FunctionFinding]) -> str:
         )
     total = sum(len(f.bugs) for f in with_bugs)
     header = f"## 🔍 TypeWright found {total} issue(s) in {len(with_bugs)} function(s)\n"
-    return header + "\n" + "\n".join(_format_finding(f) for f in with_bugs)
+    body = header + "\n" + "\n".join(_format_finding(f) for f in with_bugs)
+    return body + "\n\n" + _INFERRED_DISCLAIMER

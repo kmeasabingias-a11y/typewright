@@ -297,3 +297,12 @@ trade-off stays visible while Phases 3–6 are built on this foundation:
    companion is unavailable, round-trip degrades gracefully to "detected but not executable."
    Fetching the companion from the surrounding repo is a possible Phase 7 (GitHub diff)
    enhancement.
+
+**Update (2026-06-28, D57) — found by testing on real code.** Two mitigations were added after a real-repo
+test surfaced both failure modes. Risk 3 (and any hallucinated helper) is now **hard-guarded**: testgen runs
+a deterministic `symtable` pass and **drops any generated test that references an undefined name**, so a
+companion-less round-trip can never run as a phantom `NameError` "crash." Risk 2 (over-inferred
+metamorphic/postcondition) proved **not** fixable by confidence-gating — the bogus `slugify(s)==slugify(s.upper())`
+came back at 0.90 confidence, the same as a *genuine* metamorphic bug — so it is handled honestly with an
+**inferred-property disclaimer** in the comment/web output ("confirm the property is one your function
+guarantees") rather than a fake oracle. The precision-over-coverage trade-off stands.

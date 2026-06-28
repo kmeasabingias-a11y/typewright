@@ -27,6 +27,11 @@ _BAD_TEST = """\
 def test_bad(a):
     assert add(a,"""
 
+_UNDEFINED_REF_TEST = """\
+@given(a=st.integers())
+def test_round_trip(a):
+    assert decode(add(a, 0)) == a"""
+
 
 def _meta() -> FunctionMetadata:
     return FunctionMetadata(
@@ -176,3 +181,17 @@ def test_generate_test_file_wraps_llm_failure(monkeypatch):
         testgen.generate_test_file(_meta(), _analysis(), _plan(), settings)
     assert exc_info.value.stage == "test_generation"
     assert "boom" in exc_info.value.detail
+
+
+def test_drops_tests_referencing_undefined_names(monkeypatch):
+    tests = GeneratedTests(test_functions=[_METAMORPHIC_TEST, _UNDEFINED_REF_TEST])
+    fake = _FakeCompletions(result=tests)
+    monkeypatch.setattr(testgen, "_client", lambda: _fake_client(fake))
+    settings = _settings_with_key(monkeypatch)
+
+    result = testgen.generate_test_file(_meta(), _analysis(), _plan(), settings)
+
+    assert "test_metamorphic" in result.test_names       # valid test kept
+    assert "test_round_trip" not in result.test_names    # undefined-ref test dropped
+    assert "decode" not in result.source
+    assert any("decode" in note for note in result.skipped)

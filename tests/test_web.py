@@ -27,3 +27,8 @@ def test_index_supports_shared_links():
     body = TestClient(create_app()).get("/").text
     assert "/v1/runs/" in body
     assert 'id="share"' in body
+
+
+def test_index_shows_inferred_property_disclaimer():
+    body = TestClient(create_app()).get("/").text
+    assert "AI-inferred properties" in body
