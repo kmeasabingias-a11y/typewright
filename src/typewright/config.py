@@ -86,6 +86,13 @@ class Settings(BaseSettings):
     # Hard per-analysis LLM-cost ceiling (USD). A request's max_cost_usd can only lower it; an
     # analysis that crosses it aborts with 402. Tune to your model tiers + typical function size.
     max_cost_usd: float = 0.50
+    # --- Cost controls (Phase 10, D58): global monthly cap ---
+    # Aggregate LLM-spend ceiling (USD) across ALL analyses and entry points (web + GitHub App +
+    # fix) within a calendar month, persisted in the runs_db_path SQLite file. Once the month's
+    # running total reaches this, further LLM calls return 503 + Retry-After until the month rolls
+    # over. Set to 0 (or negative) to disable the monthly cap. Both the web and worker processes
+    # must share the same runs_db_path for one global counter.
+    max_monthly_cost_usd: float = 10.00
     # --- Rate limiting (Phase 9, D53) ---
     # Per-IP on /v1/analyze and per-installation on the webhook; 429 + Retry-After. Backend "memory"
     # (default, per-process — fine for one instance) or "redis" (shared across replicas, uses redis_url).

@@ -22,7 +22,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import Settings, get_settings
-from .errors import CostBudgetExceededError, PipelineError, RateLimitedError, SandboxTimeoutError, SandboxUnavailableError, TypeWrightError
+from .errors import CostBudgetExceededError, MonthlyBudgetExceededError, PipelineError, RateLimitedError, SandboxTimeoutError, SandboxUnavailableError, TypeWrightError
 from .execution import run_tests
 from .fixgen import build_fix_file, finalize, suggest_fix
 from .generation import generate_strategies
@@ -168,7 +168,7 @@ def _maybe_suggest_fix(
         return None
     try:
         proposed = suggest(meta, report, model_tier=request.model_tier)
-    except (PipelineError, CostBudgetExceededError) as exc:
+    except (PipelineError, CostBudgetExceededError, MonthlyBudgetExceededError) as exc:
         logger.warning("fix suggestion skipped (%s): %s", type(exc).__name__, exc)
         return None
 
@@ -235,6 +235,26 @@ def create_app() -> FastAPI:
                 "spent_usd": round(exc.spent_usd, 6),
                 "limit_usd": exc.limit_usd,
             },
+        )
+
+    @app.exception_handler(MonthlyBudgetExceededError)
+    async def handle_monthly_budget(request: Request, exc: MonthlyBudgetExceededError) -> JSONResponse:
+        """Map an exhausted global monthly cost budget to 503 + Retry-After (Phase 10, D58).
+
+        Distinct from the per-analysis 402 (D52): the *service's* monthly spend is used up, so the
+        honest answer is "temporarily unavailable, try again later," not "your request was too
+        expensive." Reads (GET /, /v1/runs/{id}, /health) are unaffected — they make no LLM call.
+        """
+        logger.warning("monthly cost budget exhausted: %s", exc)
+        headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after is not None else None
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": str(exc),
+                "spent_usd": round(exc.spent_usd, 6),
+                "limit_usd": exc.limit_usd,
+            },
+            headers=headers,
         )
     
     @app.exception_handler(RateLimitedError)

@@ -50,3 +50,49 @@ def test_cost_scope_enforces_the_budget():
     with pytest.raises(CostBudgetExceededError):
         with cost_scope(limit_usd=0.01) as meter:
             add_cost(_RawWithHiddenCost(0.02))
+
+
+def test_monthly_meter_accumulates_and_persists(tmp_path):
+    from typewright.metrics import MonthlyCostMeter
+
+    db = str(tmp_path / "runs.db")
+    m = MonthlyCostMeter(db, limit_usd=1.00)
+    m.add(0.30)
+    m.add(0.20)
+    assert round(m.current_total(), 4) == 0.50
+    # a fresh meter on the same file sees the same total -> durable across restarts
+    assert round(MonthlyCostMeter(db, limit_usd=1.00).current_total(), 4) == 0.50
+
+
+def test_monthly_meter_check_raises_when_exhausted(tmp_path):
+    from typewright.errors import MonthlyBudgetExceededError
+    from typewright.metrics import MonthlyCostMeter
+
+    m = MonthlyCostMeter(str(tmp_path / "runs.db"), limit_usd=0.10)
+    m.add(0.05)
+    m.check()  # under the cap -> fine
+    m.add(0.06)  # total 0.11 >= 0.10
+    with pytest.raises(MonthlyBudgetExceededError) as excinfo:
+        m.check()
+    assert excinfo.value.limit_usd == 0.10
+    assert excinfo.value.retry_after > 0
+
+
+def test_monthly_meter_add_ignores_nonpositive(tmp_path):
+    from typewright.metrics import MonthlyCostMeter
+
+    m = MonthlyCostMeter(str(tmp_path / "runs.db"), limit_usd=1.00)
+    m.add(0.0)
+    m.add(-0.5)
+    assert m.current_total() == 0.0
+
+
+def test_monthly_meter_disabled_when_nonpositive():
+    from types import SimpleNamespace
+    from typewright.llm import _monthly_meter
+    from typewright.metrics import MonthlyCostMeter
+
+    disabled = SimpleNamespace(max_monthly_cost_usd=0, runs_db_path="unused.db")
+    enabled = SimpleNamespace(max_monthly_cost_usd=5.0, runs_db_path="unused.db")
+    assert _monthly_meter(disabled) is None
+    assert isinstance(_monthly_meter(enabled), MonthlyCostMeter)

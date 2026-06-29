@@ -14,10 +14,13 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import sqlite3
+from datetime import datetime, timezone
 from typing import Iterator
 
 import litellm
-from .errors import CostBudgetExceededError
+
+from .errors import CostBudgetExceededError, MonthlyBudgetExceededError
 
 
 class CostMeter:
@@ -74,3 +77,83 @@ def cost_scope(limit_usd: float | None = None) -> Iterator[CostMeter]:
         yield meter
     finally:
         _active_meter.reset(token)
+
+
+class MonthlyCostMeter:
+    """A durable, process-shared monthly LLM-spend ceiling, persisted in SQLite (Phase 10, D58).
+
+    Unlike the per-analysis ``CostMeter`` (request-scoped, in-memory, D52), this caps the
+    operator's *aggregate* spend across every analysis and entry point within a calendar month.
+    The running total lives in a ``monthly_cost`` table in the same SQLite file as the run store
+    (``runs_db_path``), keyed by ``YYYY-MM`` (UTC), so the web process and the GitHub-App worker
+    share one counter and it survives restarts. A connection is opened per call (WAL), mirroring
+    ``SqliteRunStore``, so it is safe from FastAPI's threadpool.
+
+    Enforcement is a PRE-check at the LLM chokepoint: ``check()`` runs before each completion and
+    raises ``MonthlyBudgetExceededError`` (-> 503) once the month's total has reached the ceiling,
+    so a request made *after* the cap is hit costs zero LLM calls. ``add()`` records spend after a
+    completion and never raises (the call already happened); the next ``check()`` is the gate. Net
+    effect, like D52: spend is bounded at the ceiling plus the calls in flight when it was crossed.
+    """
+
+    def __init__(self, db_path: str, limit_usd: float) -> None:
+        self._path = db_path
+        self.limit_usd = limit_usd
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self._path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS monthly_cost ("
+            "month TEXT PRIMARY KEY, total_usd REAL NOT NULL)"
+        )
+        return conn
+
+    def current_total(self) -> float:
+        """USD spent so far in the current (UTC) calendar month."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT total_usd FROM monthly_cost WHERE month = ?", (_month_key(),)
+            ).fetchone()
+        finally:
+            conn.close()
+        return float(row[0]) if row is not None else 0.0
+
+    def check(self) -> None:
+        """Raise MonthlyBudgetExceededError (-> 503) if this month's spend has reached the ceiling."""
+        total = self.current_total()
+        if total >= self.limit_usd:
+            raise MonthlyBudgetExceededError(total, self.limit_usd, _seconds_to_month_rollover())
+
+    def add(self, cost_usd: float) -> None:
+        """Atomically add ``cost_usd`` to this month's running total (never raises)."""
+        if cost_usd <= 0:
+            return
+        conn = self._connect()
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT INTO monthly_cost (month, total_usd) VALUES (?, ?) "
+                    "ON CONFLICT(month) DO UPDATE SET total_usd = total_usd + excluded.total_usd",
+                    (_month_key(), cost_usd),
+                )
+        finally:
+            conn.close()
+
+    def add_from_raw(self, raw_completion: object) -> None:
+        """Bill one LiteLLM completion's cost to the monthly total (best-effort, 0.0 on a miss)."""
+        self.add(_response_cost(raw_completion))
+
+
+def _month_key() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m")
+
+
+def _seconds_to_month_rollover() -> int:
+    now = datetime.now(timezone.utc)
+    if now.month == 12:
+        nxt = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        nxt = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+    return int((nxt - now).total_seconds())

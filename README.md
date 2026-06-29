@@ -132,6 +132,7 @@ The most common:
 | `TYPEWRIGHT_KESTREL_BASE_URL` | `http://localhost:8000` | Where Kestrel is reachable. |
 | `TYPEWRIGHT_DEFAULT_MODEL_TIER` | `standard` | `economy` (Haiku 4.5), `standard` (Sonnet 4.6), `premium` (Opus 4.8). |
 | `TYPEWRIGHT_MAX_COST_USD` | `0.50` | Per-analysis LLM cost ceiling; crossing it returns `402`. |
+| `TYPEWRIGHT_MAX_MONTHLY_COST_USD` | `10.00` | Global monthly LLM-spend ceiling across all analyses; crossing it returns `503` until month rollover. |
 | `TYPEWRIGHT_REDIS_URL` | `redis://localhost:6379` | Queue for the GitHub App worker. |
 | `TYPEWRIGHT_RATE_LIMIT_BACKEND` | `memory` | `memory` or `redis`; per-IP / per-installation limits. |
 | `TYPEWRIGHT_LOG_FORMAT` | `text` | `text` or `json` (structured per-analysis traces). |

@@ -113,6 +113,24 @@ class CostBudgetExceededError(Exception):
         )
 
 
+class MonthlyBudgetExceededError(Exception):
+    """The service hit its global monthly LLM-cost ceiling — mapped to 503 (Phase 10, D58).
+
+    Distinct from ``CostBudgetExceededError`` (one analysis's own budget -> 402, the caller's
+    concern): this is the operator's *aggregate* monthly spend across every analysis and entry
+    point being used up, so the honest answer is "temporarily unavailable, try again later" — a
+    503. Carries ``retry_after`` (seconds to month rollover) for the Retry-After header.
+    """
+
+    def __init__(self, spent_usd: float, limit_usd: float, retry_after: int | None = None) -> None:
+        self.spent_usd = spent_usd
+        self.limit_usd = limit_usd
+        self.retry_after = retry_after
+        super().__init__(
+            f"Monthly LLM-cost budget of ${limit_usd:.2f} exhausted (spent ${spent_usd:.4f})."
+        )
+
+
 class GitHubError(Exception):
     """A GitHub API call failed (auth, fetch, or comment) — Phase 7.
 

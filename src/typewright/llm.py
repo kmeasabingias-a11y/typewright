@@ -19,8 +19,8 @@ from litellm import completion
 from pydantic import BaseModel
 
 from .config import Settings
-from .errors import CostBudgetExceededError, PipelineError
-from .metrics import add_cost
+from .errors import CostBudgetExceededError, MonthlyBudgetExceededError, PipelineError
+from .metrics import MonthlyCostMeter, add_cost
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -28,6 +28,14 @@ T = TypeVar("T", bound=BaseModel)
 def build_client() -> instructor.Instructor:
     """Build the Instructor-wrapped LiteLLM client (D13/D17)."""
     return instructor.from_litellm(completion)
+
+
+def _monthly_meter(settings: Settings) -> MonthlyCostMeter | None:
+    """The global monthly cost meter for these settings, or None when the cap is disabled (D58)."""
+    limit = settings.max_monthly_cost_usd
+    if limit is None or limit <= 0:
+        return None
+    return MonthlyCostMeter(settings.runs_db_path, limit)
 
 
 def complete(
@@ -64,17 +72,22 @@ def complete(
         timeout=settings.llm_timeout_seconds,
         messages=messages,
     )
+    monthly = _monthly_meter(settings)
     try:
         completions = client_factory().chat.completions
         # A real Instructor client exposes create_with_completion -> we get the raw response too
         # and bill its cost (add_cost is a no-op outside an analysis cost_scope). Hand-written test
         # fakes only have create(), so fall back to it (those paths make no real LLM call to bill).
         if hasattr(completions, "create_with_completion"):
+            if monthly is not None:
+                monthly.check()  # global monthly cap, pre-check -> 503 once exhausted (D58)
             parsed, raw = completions.create_with_completion(**kwargs)
-            add_cost(raw)
+            add_cost(raw)  # per-analysis meter (D51/D52)
+            if monthly is not None:
+                monthly.add_from_raw(raw)  # global monthly counter (D58)
             return parsed
         return completions.create(**kwargs)
-    except (PipelineError, CostBudgetExceededError):
+    except (PipelineError, CostBudgetExceededError, MonthlyBudgetExceededError):
         raise
     except Exception as exc:  # noqa: BLE001 — any LLM/transport failure becomes a 500
         raise PipelineError(stage, str(exc)) from exc

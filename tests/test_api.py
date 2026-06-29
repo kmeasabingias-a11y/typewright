@@ -577,3 +577,16 @@ def test_sandbox_unavailable_returns_503(make_client):
 def test_oversized_code_is_422(client):
     resp = client.post("/v1/analyze", json={"code": "x" * 100_001})
     assert resp.status_code == 422
+
+
+def test_monthly_budget_exhausted_returns_503(make_client):
+    from typewright.errors import MonthlyBudgetExceededError
+
+    def exhausted(meta, *, model_tier=None):
+        raise MonthlyBudgetExceededError(spent_usd=10.5, limit_usd=10.0, retry_after=3600)
+
+    client = make_client(infer=exhausted)
+    resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
+    assert resp.status_code == 503
+    assert resp.headers["retry-after"] == "3600"
+    assert resp.json()["limit_usd"] == 10.0
