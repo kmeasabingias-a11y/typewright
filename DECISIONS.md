@@ -836,3 +836,38 @@ LLM-inferred property testing — not something a cheap oracle eliminates — so
 hard-guard the part that IS deterministic (an undefined name is objectively a broken test, never a bug) and
 (b) frame the rest honestly (let the human judge whether the inferred property is intended) rather than
 pretend a gate makes it reliable.
+
+## Phase 10
+
+### D58 — Global monthly cost cap is a hard launch blocker; SQLite-persisted, surfaced as 503
+**Decision (scoping + mechanism; implementation lands in Phase 10):** Before the deferred public-URL deploy
+goes live, TypeWright must enforce a **global monthly cost cap** — an aggregate USD ceiling on *total* LLM
+spend across every analysis and every entry point (web `/v1/analyze`, the GitHub-App worker, fix-gen) within a
+calendar month. New config `max_monthly_cost_usd` (default **10.00** — a knob the operator can change without
+code). Mechanism: an **always-on global meter at the `llm.complete` chokepoint** — unlike D51's request-scoped
+`cost_scope` (billed only while a scope is open), this one bills *unconditionally* after every completion, so
+it covers all three paths with no scope-threading and also closes the deferred D52 follow-on (the worker path
+is currently unmetered). The running total is **persisted in SQLite** (the same durable store as the D50 run
+store), keyed by `YYYY-MM` (UTC calendar month); the increment is a single atomic `UPDATE … SET total = total
++ ?`. When a completion carries the month's total past the ceiling the meter raises a new
+`MonthlyBudgetExceededError`, mapped to **503 Service Unavailable + `Retry-After`** (seconds to month
+rollover). Reads (`GET /`, `?run=` shareable links, `/health`) stay unlimited, so a tripped cap degrades the
+demo to read-only rather than dark. As with D52, billing-after-the-call bounds worst-case spend at the ceiling
+**plus one in-flight call**.
+**Why:** the two Phase-9 cost controls don't bound the operator's *monthly* bill. The per-analysis cap (D52,
+`max_cost_usd=0.50` → 402) bounds *one request* and its `CostMeter` is request-scoped (nothing accumulates);
+rate limiting (D53, 10/IP/min → 429) bounds *one caller's rate*. On a public, unauthenticated endpoint, N
+callers over a month is unbounded — so a hard monthly ceiling is the missing backstop, and a public deploy
+without it is an open-ended cost/abuse vector. Hence a **launch blocker**, not a nice-to-have. **SQLite over
+Redis** because durability is the whole point of a monthly counter: SQLite is durable by default, is already
+the project's persistent store (D50), needs no extra infra, and fits the single-host deploy shape (per the
+Phase-8 deploy scoping); arq's Redis is typically treated as ephemeral (a restart could drop the month's
+total) and the D53 Redis path *fails open* — the wrong default for a cost cap. Redis stays a drop-in if the
+service ever scales to multiple replicas: the global-meter seam keeps it swappable, mirroring D50/D53.
+**503, not 402:** 402 (D52) is the caller-facing "your request costs too much"; the monthly cap is "the
+service's budget is spent — not your fault," which is exactly D55's 503 + Retry-After semantics, and keeping
+the two codes distinct lets a caller tell "you're capped" from "we're capped." Default **$10** ≈ the
+operator's current API credit, capping worst-case monthly loss at roughly that; raise it before a
+higher-traffic launch. **Status: decided 2026-06-29; to be implemented in Phase 10** — a `MonthlyCostMeter`
+backed by a SQLite counter, billed at the `llm.complete` chokepoint, a `MonthlyBudgetExceededError` → 503
+handler, the `max_monthly_cost_usd` config, and the worker path finally billed.

@@ -164,7 +164,18 @@ Each step is one specific LLM call with structured output — not a free-form ag
   status (429/502/503/504) now surfaces as **503** + `Retry-After` (a `SandboxUnavailableError`, not folded
   into 500), and `code` is capped at 100k chars → **422** up front. ✅ **All 5 units done** — the cost,
   rate, observability, and resilience controls are in place. *Exit: production-ready under load.*
-- **Phase 10 — Polish & launch.** Docs, acknowledgments, final demo.
+- **Phase 10 — Polish & launch.** Docs, acknowledgments, final demo. **Hard launch blocker
+  (decided 2026-06-29):** a global **monthly cost cap** — an aggregate USD ceiling
+  (`max_monthly_cost_usd`) on *total* LLM spend across every analysis and every entry point
+  (web `/v1/analyze` + the GitHub-App worker + fix-gen) within a calendar month. It is distinct
+  from the per-analysis cap (D52, bounds one request → 402) and rate limiting (D53, bounds one
+  caller's rate → 429): neither bounds the operator's *total* monthly bill on a public,
+  unauthenticated endpoint, so the deferred public-URL deploy must not go live until this lands.
+  Mechanism (D58): an **always-on global meter at the `llm.complete` chokepoint** (covers web + worker
+  + fix, no scope-threading), a monthly total **persisted in SQLite** (D50 store, keyed `YYYY-MM` UTC) with
+  `max_monthly_cost_usd` default **10.00**; crossing it → **503 + `Retry-After`** (distinct from D52's 402),
+  reads stay open — to be implemented in Phase 10. *Exit: launch artifacts done AND the monthly cap enforced
+  live.*
 
 ## 5. API specification
 
