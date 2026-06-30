@@ -1,0 +1,92 @@
+# docker-compose.demo.yml — full-stack public demo (Phase 10, Stage 2, D59).
+#
+# Runs the TypeWright web demo + the Kestrel sandbox on ONE trusted Docker host.
+# Kestrel executes untrusted, AI-generated test code, so it drives the HOST docker
+# daemon (docker-out-of-docker) to launch locked-down sandbox containers — that is
+# why this can't live on a one-click PaaS and needs a host you control.
+#
+# Public access is via an on-demand Cloudflare quick tunnel (see DEPLOY.md), NOT a
+# directly-open port: TypeWright is published on 127.0.0.1 only. All three launch
+# guards are on — per-IP rate limit (D53), per-analysis $0.50 cap (D52), and the
+# global monthly cap (D58, default $10) — so a persistent URL is defensible.
+#
+# PREREQUISITES (DEPLOY.md walks through these):
+#   1. docker build -t typewright-test-runtime:0.1 -f docker/test-runtime.Dockerfile .   # in THIS repo
+#   2. docker build -t kestrel-api:0.8.0 -f docker/api/Dockerfile .                       # in the Kestrel repo
+#   3. sudo mkdir -p /var/kestrel/spool /var/typewright/data
+#      sudo chown 10001:10001 /var/typewright/data        # 10001 = appuser in TypeWright's Dockerfile
+#   4. ANTHROPIC_API_KEY available to compose (this repo's .env already has it).
+#
+# Web demo:        docker compose -f docker-compose.demo.yml up -d --build
+# + GitHub PR bot: docker compose -f docker-compose.demo.yml --profile github up -d --build
+
+services:
+  # ---- Kestrel sandbox: auth OFF, no Postgres/Redis (mirrors the verified local smoke) ----
+  kestrel:
+    image: kestrel-api:0.8.0                 # built separately from the Kestrel repo (prereq 2)
+    environment:
+      KESTREL_DEV_API_KEY: ""                # empty key + null backends => auth disabled
+      KESTREL_API_KEY_BACKEND: "null"
+      KESTREL_AUDIT_BACKEND: "null"
+      KESTREL_SESSION_BACKEND: "memory"
+      KESTREL_EXECUTOR_DOCKER_IMAGE: "typewright-test-runtime:0.1"  # pytest+hypothesis runtime
+      KESTREL_EXECUTE_TIMEOUT_SECONDS: "60"  # Kestrel's own default is 5s -> spurious 504s
+      KESTREL_EXECUTE_OUTPUT_CAP_BYTES: "262144"
+      KESTREL_EXEC_SPOOL_DIR: "/var/kestrel/spool"  # must equal the host bind-mount path
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # drive the HOST daemon
+      - /var/kestrel/spool:/var/kestrel/spool       # IDENTICAL host:container path (docker-out-of-docker)
+    # No published ports: only TypeWright reaches Kestrel, over the internal network.
+    restart: unless-stopped
+
+  # ---- TypeWright web demo (the public face) ----
+  typewright:
+    build: .
+    image: typewright:demo
+    environment:
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in a .env beside this file}"
+      TYPEWRIGHT_KESTREL_BASE_URL: "http://kestrel:8000"
+      TYPEWRIGHT_KESTREL_TIMEOUT_SECONDS: "45"   # <= Kestrel's 60s ceiling
+      TYPEWRIGHT_RUNS_DB_PATH: "/data/runs.db"   # bind volume -> links + monthly cap survive redeploys
+      TYPEWRIGHT_MAX_MONTHLY_COST_USD: "10.00"   # global LLM-spend backstop (D58); lower to taste
+      TYPEWRIGHT_MAX_COST_USD: "0.50"            # per-analysis cap (D52)
+      TYPEWRIGHT_TRUST_FORWARDED_FOR: "true"     # the Cloudflare tunnel is a trusted proxy -> real client IP
+      TYPEWRIGHT_LOG_FORMAT: "json"              # structured logs for an aggregator (D54)
+      # Only used by --profile github (harmless/empty otherwise):
+      TYPEWRIGHT_REDIS_URL: "redis://redis:6379"
+      TYPEWRIGHT_GITHUB_WEBHOOK_SECRET: "${TYPEWRIGHT_GITHUB_WEBHOOK_SECRET:-}"
+    volumes:
+      - /var/typewright/data:/data
+    ports:
+      - "127.0.0.1:8001:8000"          # localhost-only; public access is via the tunnel
+    depends_on:
+      - kestrel                        # started, not healthy — TypeWright only calls Kestrel per-request
+    restart: unless-stopped
+
+  # ---- OPTIONAL GitHub PR bot (webhook queue + worker). Enable with --profile github ----
+  redis:
+    image: redis:7-alpine
+    profiles: ["github"]
+    restart: unless-stopped
+
+  worker:
+    image: typewright:demo             # same image; runs the arq worker instead of uvicorn
+    profiles: ["github"]
+    command: ["arq", "typewright.worker.WorkerSettings"]
+    environment:
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:?}"
+      TYPEWRIGHT_KESTREL_BASE_URL: "http://kestrel:8000"
+      TYPEWRIGHT_KESTREL_TIMEOUT_SECONDS: "45"
+      TYPEWRIGHT_RUNS_DB_PATH: "/data/runs.db"   # SAME volume as the web app -> one shared monthly counter (D58)
+      TYPEWRIGHT_MAX_MONTHLY_COST_USD: "10.00"
+      TYPEWRIGHT_MAX_COST_USD: "0.50"
+      TYPEWRIGHT_REDIS_URL: "redis://redis:6379"
+      TYPEWRIGHT_GITHUB_APP_ID: "${TYPEWRIGHT_GITHUB_APP_ID:-}"
+      TYPEWRIGHT_GITHUB_APP_PRIVATE_KEY_PATH: "/secrets/app.pem"
+    volumes:
+      - /var/typewright/data:/data
+      - ./app.pem:/secrets/app.pem:ro  # copy/rename your GitHub App private key here (gitignored *.pem)
+    depends_on:
+      - redis
+      - kestrel
+    restart: unless-stopped
