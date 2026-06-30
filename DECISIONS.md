@@ -871,3 +871,47 @@ operator's current API credit, capping worst-case monthly loss at roughly that; 
 higher-traffic launch. **Status: decided 2026-06-29; to be implemented in Phase 10** — a `MonthlyCostMeter`
 backed by a SQLite counter, billed at the `llm.complete` chokepoint, a `MonthlyBudgetExceededError` → 503
 handler, the `max_monthly_cost_usd` config, and the worker path finally billed.
+
+**Implementation (2026-06-30, committed `11dd491`; 175 tests green; live-smoke-verified):** a
+`MonthlyCostMeter` (SQLite `monthly_cost` table in `runs_db_path`, keyed `YYYY-MM` UTC) enforced at the
+`llm.complete` chokepoint — but built **per-call from settings**, *not* a process-global/contextvar (a
+deliberate refinement of the "always-on global meter" wording: a settings-built meter sidesteps the
+cross-test state-bleed the D53 rate-limiter had to fight, and the worker participates simply by pointing at
+the same `runs_db_path`). `check()` runs **pre-call** (raises once the month total ≥ limit, so a *blocked*
+request costs **0** LLM calls), `add_from_raw(raw)` runs **post-call** (atomic UPSERT, never raises — the
+next `check()` is the gate). Only the real-Instructor branch touches it, so fake-client and mocked-API tests
+never write `runs.db`. Crossing the cap raises `MonthlyBudgetExceededError` → **503 + `Retry-After`** (seconds
+to month rollover). Live smoke 2026-06-30: one real analysis billed $0.036885 into the `2026-06` row; with the
+cap lowered to $0.01 the next analyze returned **503 + `Retry-After: 48000` in 44 ms = $0 spend**, and the
+counter was unchanged after the block (reads — `GET /`, `?run=` links — stayed open).
+
+### D59 — Demo deploy shape: full stack on one trusted host, public via an on-demand tunnel
+**Decision:** Ship two repo-root artifacts — `docker-compose.demo.yml` + `DEPLOY.md` — that stand the whole
+product up on **one trusted Docker host** and expose it through an **on-demand Cloudflare quick tunnel**, not a
+24/7 open endpoint. Shape: (1) **Kestrel containerized in auth-off / no-database mode** — an empty
+`KESTREL_DEV_API_KEY` plus `API_KEY_BACKEND=null` + `AUDIT_BACKEND=null` + `SESSION_BACKEND=memory` disables
+auth and drops Postgres/Redis (the same trust model as the verified local smoke) — driving the host daemon via
+a mounted `/var/run/docker.sock`, with the code-spool dir bind-mounted at an **identical host:container path**
+(`/var/kestrel/spool`). That identical path is the docker-out-of-docker requirement: Kestrel writes each run's
+tempfile under the spool dir so the *host* daemon (which actually launches the sandbox) can mount it in. (2)
+**TypeWright** built from the repo, reaching Kestrel at `http://kestrel:8000`, with `runs.db` on a **host bind
+mount chowned to uid 10001** (`appuser`) rather than a named volume, and published on **`127.0.0.1:8001`
+only**. (3) Public access is a per-demo `cloudflared tunnel --url http://localhost:8001`, with
+`TYPEWRIGHT_TRUST_FORWARDED_FOR=true` so per-IP rate limiting keys on the real visitor behind it. (4) An
+optional `--profile github` adds Redis + the arq worker, sharing the **same** `runs.db` volume.
+**Why:** A one-click PaaS can't host this — Kestrel needs the host's Docker socket (docker-out-of-docker), so
+the target is a box you control, and the compose mirrors Kestrel's own production compose minus Postgres.
+Containerized auth-off Kestrel keeps the demo to a single store-less stack while matching the smoke's trust
+model. The **bind-mount-plus-chown** for `runs.db` is not cosmetic: TypeWright's image runs as uid 10001, and
+a fresh *named* volume mounts root-owned, so `appuser` couldn't create `runs.db` there — a host dir chowned to
+10001 is the fix, and it's symmetric with Kestrel's spool mount. Binding the app to `127.0.0.1` plus an
+**on-demand** tunnel means there is no permanent, unauthenticated code-execution URL standing on the public
+internet: the three guards (rate limit D53, per-analysis cap D52, monthly cap D58) make a public URL
+*defensible*, but keeping it on-demand keeps the standing attack surface near zero — a deliberate step back
+from a 24/7 VPS. `trust_forwarded_for` stays off by default (a client could otherwise spoof its IP) and is only
+safe to flip on behind a proxy we control, which the tunnel is. The optional worker **shares one `runs.db`**
+precisely so the D58 monthly counter is global across the web and PR-bot paths (closing the gap D58 names).
+The containerized auth-off Kestrel is the one piece not yet exercised live (the smoke ran Kestrel as a host
+process); DEPLOY.md's troubleshooting documents that exact host-process form as a verified fallback. **Status:
+artifacts authored 2026-06-30 (`docker compose config`-validated, both profiles); live bring-up on a host is
+the remaining verification, then the recorded demo (the last launch step).**

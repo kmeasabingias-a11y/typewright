@@ -174,8 +174,17 @@ Each step is one specific LLM call with structured output — not a free-form ag
   Mechanism (D58): an **always-on global meter at the `llm.complete` chokepoint** (covers web + worker
   + fix, no scope-threading), a monthly total **persisted in SQLite** (D50 store, keyed `YYYY-MM` UTC) with
   `max_monthly_cost_usd` default **10.00**; crossing it → **503 + `Retry-After`** (distinct from D52's 402),
-  reads stay open — to be implemented in Phase 10. *Exit: launch artifacts done AND the monthly cap enforced
-  live.*
+  reads stay open. ✅ **Implemented + live-verified** (`11dd491`; 175 tests): a `MonthlyCostMeter` SQLite
+  counter billed at the `llm.complete` chokepoint (built per-call from settings, so the worker shares it by
+  pointing at the same `runs_db_path`), `check()` pre-call / `add_from_raw()` post-call, `MonthlyBudgetExceededError`
+  → 503. The full-stack live smoke (2026-06-30) confirmed it end-to-end: one real analysis billed $0.037, and
+  with the cap lowered the next analyze returned 503 + `Retry-After` at the pre-call check (**$0 spend**, counter
+  unchanged). **Deploy artifacts authored (D59):** `docker-compose.demo.yml` + `DEPLOY.md` stand the whole stack
+  (TypeWright + Kestrel auth-off, docker-out-of-docker) up on one trusted Docker host with `runs.db` on a
+  persistent bind mount and an **on-demand Cloudflare tunnel** for the public URL — `127.0.0.1`-only publish +
+  `trust_forwarded_for` behind the tunnel, optional `--profile github` for the PR bot sharing one `runs.db`.
+  *Exit: launch artifacts done AND the monthly cap enforced live* — cap criterion ✅ met; live host bring-up +
+  the recorded demo are the remaining launch steps.
 
 ## 5. API specification
 
