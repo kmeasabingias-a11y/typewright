@@ -195,3 +195,23 @@ def test_drops_tests_referencing_undefined_names(monkeypatch):
     assert "test_round_trip" not in result.test_names    # undefined-ref test dropped
     assert "decode" not in result.source
     assert any("decode" in note for note in result.skipped)
+
+
+def test_assemble_reemits_module_imports():
+    """Module-level imports from the pasted code are re-emitted into the file, before the fn (D61)."""
+    meta = FunctionMetadata(
+        name="f",
+        args=[Argument(name="x")],
+        signature="(x)",
+        source="def f(x):\n    return re.sub('a', 'b', x)",
+        module_imports=["import re"],
+    )
+    plan = StrategyPlan(strategies=[], extra_imports=[])
+    tests = GeneratedTests(
+        test_functions=["@given(x=st.text())\ndef test_x(x):\n    f(x)"],
+        extra_imports=[],
+        skipped=[],
+    )
+    out = testgen._assemble(meta, plan, tests)
+    assert "import re" in out
+    assert out.index("import re") < out.index("def f(x)")

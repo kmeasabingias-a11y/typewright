@@ -11,7 +11,7 @@
 # global monthly cap (D58, default $10) — so a persistent URL is defensible.
 #
 # PREREQUISITES (DEPLOY.md walks through these):
-#   1. docker build -t typewright-test-runtime:0.1 -f docker/test-runtime.Dockerfile .   # in THIS repo
+#   1. docker build -t typewright-test-runtime:0.2 -f docker/test-runtime.Dockerfile .   # in THIS repo
 #   2. docker build -t kestrel-api:0.8.0 -f docker/api/Dockerfile .                       # in the Kestrel repo
 #   3. sudo mkdir -p /var/kestrel/spool /var/typewright/data
 #      sudo chown 10001:10001 /var/typewright/data        # 10001 = appuser in TypeWright's Dockerfile
@@ -29,7 +29,7 @@ services:
       KESTREL_API_KEY_BACKEND: "null"
       KESTREL_AUDIT_BACKEND: "null"
       KESTREL_SESSION_BACKEND: "memory"
-      KESTREL_EXECUTOR_DOCKER_IMAGE: "typewright-test-runtime:0.1"  # pytest+hypothesis runtime
+      KESTREL_EXECUTOR_DOCKER_IMAGE: "typewright-test-runtime:0.2"  # pytest+hypothesis runtime
       KESTREL_EXECUTE_TIMEOUT_SECONDS: "60"  # Kestrel's own default is 5s -> spurious 504s
       KESTREL_EXECUTE_OUTPUT_CAP_BYTES: "262144"
       KESTREL_EXEC_SPOOL_DIR: "/var/kestrel/spool"  # must equal the host bind-mount path

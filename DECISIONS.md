@@ -950,3 +950,33 @@ before/after experiment (run with `bug_verification_enabled` off, then on). **Sc
 only (where the web demo + the benchmark run); the worker/PR-bot path + the web/comment two-tier UI are a noted
 follow-on. **Status: implemented 2026-06-30 (184 tests green, uncommitted); before/after benchmark deferred
 until the operator recharges API credit.**
+
+### D61 — Sandbox dependency handling: carry stdlib imports, allowlist common third-party, no phantom ImportError
+**Decision:** Make the import story honest end-to-end. (1) **Stdlib carry-through:** the parser captured only
+the function's `def` block, so a module-level `import re` written above it was dropped — and the function then
+hit a `NameError`/import failure in the sandbox, surfaced as a phantom *crash* bug. The parser now collects the
+pasted code's module-level imports (`FunctionMetadata.module_imports`) and testgen re-emits them into the
+generated file, so any stdlib import reliably runs. (2) **Third-party allowlist (B):** a curated set —
+`numpy, pandas, requests, python-dateutil, PyYAML, more-itertools` — is baked into the runtime image
+(`typewright-test-runtime:0.2`), mirrored by import name in `execution.SANDBOX_ALLOWLIST_IMPORTS`, so the
+common packages a pasted function might use actually execute. (3) **Honest degradation (A) for everything
+else:** the parser records every imported top-level module (`imported_modules`); the route computes
+`unavailable_imports` = those that are neither stdlib nor allowlisted, and when any exist it **skips the sandbox
+run** (it would only `ModuleNotFoundError`) and returns the generated tests plus the honest list — never a
+phantom crash. As a backstop, `results.parse_results` drops any `ModuleNotFoundError`/`ImportError` failure from
+`bugs_found`. New response field `AnalyzeResponse.unavailable_imports`.
+**Why:** the network-less sandbox (Kestrel's security model) can't install packages at run time, so a missing
+dependency is unavoidable for arbitrary code — but **misreporting it as a function bug is not** (it false-confirmed
+`copy_function` in the D60 benchmark). "Make *all* third-party run" was considered and rejected as impossible:
+you can't bake in ~500k PyPI packages, just-in-time `pip install` on a public unauthenticated endpoint is a
+remote-code-execution / supply-chain hole (install hooks run arbitrary code) and still can't satisfy
+C-extension/system-lib packages, and import-name↔package-name mapping is ambiguous. So the honest target is
+**stdlib always works + a common-third-party allowlist runs + everything else degrades truthfully**, never a fake
+bug. The allowlist lives in BOTH the Dockerfile and a Python constant (kept in sync by comment) because the image
+provides the packages and the route must know what's available; **Kestrel stays generic** — interpreting Python
+import errors is TypeWright's job, and the stderr it needs is already returned. Verified: the suite is green (190),
+the `:0.2` image's self-test imports the allowlist, and numpy/pandas/`re` run under Kestrel's exact locked-down
+flags (`--read-only --user 65534 --network none`, tmpfs `/tmp`) at zero LLM cost. **Status: implemented
+2026-06-30 (190 tests green; image built + sandbox-verified; uncommitted). Image bumped `:0.1`→`:0.2`; deploy
+refs (compose/DEPLOY/README) updated. Remaining: a live `/v1/analyze` round-trip on a numpy function (deferred to
+save credit — covered by the unit wiring + the sandbox check).**

@@ -193,6 +193,16 @@ Each step is one specific LLM call with structured output — not a free-form ag
     `verify_findings`). A *post-filter* (annotate-and-demote, never drops a bug), so recall is untouched; NOT
     confidence-gating (D57). Implemented + 184 tests green (uncommitted); the 49-fn eval is the before/after
     benchmark, deferred until API credit is recharged.
+  - **Sandbox dependency handling (D61):** make imports honest. The parser now carries the pasted code's
+    module-level imports through to the generated file (`FunctionMetadata.module_imports`), so any **stdlib**
+    import reliably runs (previously a top-level `import re` was dropped → phantom crash). A curated
+    **third-party allowlist** (`numpy, pandas, requests, python-dateutil, PyYAML, more-itertools`) is baked into
+    the runtime image (`typewright-test-runtime:0.2`) + mirrored in `execution.SANDBOX_ALLOWLIST_IMPORTS`, so the
+    common packages actually execute. Everything else degrades **truthfully**: the route reports
+    `AnalyzeResponse.unavailable_imports` and skips the sandbox (no `ModuleNotFoundError`), and
+    `results.parse_results` never reports an import error as a bug. "Make all third-party run" was rejected as
+    impossible/insecure (can't bake all of PyPI; JIT `pip install` on a public endpoint = RCE/supply-chain hole).
+    190 tests green; numpy/pandas verified running under Kestrel's locked-down flags (uncommitted).
 
 ## 5. API specification
 

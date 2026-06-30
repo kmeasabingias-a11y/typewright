@@ -49,6 +49,7 @@ def test_analyze_returns_only_the_honest_subset(client):
         "bugs_found",
         "fix_suggestion",
         "metadata",
+        "unavailable_imports",
     }
     assert set(body["properties"].keys()) == {
         "detected",
@@ -479,6 +480,49 @@ def test_verification_failure_degrades_not_500(make_client):
     bugs = resp.json()["bugs_found"]
     assert len(bugs) == 1  # the real analysis is intact
     assert bugs[0]["verification"] is None  # left unverified
+
+
+# --- Phase 10: sandbox dependency handling (stdlib carried, third-party honest; D61) ---
+
+
+def test_unavailable_import_reported_and_sandbox_skipped(make_client):
+    """A function needing a package the sandbox lacks: honest note, sandbox skipped, no bug (D61)."""
+    calls = {"n": 0}
+
+    def run(test_file, *, timeout_seconds, settings=None):
+        calls["n"] += 1
+        return SandboxResult(stdout="1 passed", stderr="", exit_code=0, duration_ms=1, timed_out=False)
+
+    client = make_client(run=run)
+    resp = client.post(
+        "/v1/analyze",
+        json={"code": "import tensorflow as tf\n\ndef f(x):\n    return tf.abs(x)"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["unavailable_imports"] == ["tensorflow"]
+    assert body["bugs_found"] == []  # never a phantom crash
+    assert calls["n"] == 0  # the sandbox was skipped
+
+
+def test_stdlib_import_is_available_and_runs(make_client):
+    """A stdlib import is available, so the sandbox runs and unavailable_imports is empty (D61)."""
+    calls = {"n": 0}
+
+    def run(test_file, *, timeout_seconds, settings=None):
+        calls["n"] += 1
+        return SandboxResult(stdout="1 passed in 0.05s", stderr="", exit_code=0, duration_ms=1, timed_out=False)
+
+    client = make_client(run=run)
+    resp = client.post(
+        "/v1/analyze",
+        json={"code": "import re\n\ndef f(s):\n    return re.sub('a', 'b', s)"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["unavailable_imports"] == []
+    assert calls["n"] == 1  # stdlib available -> sandbox ran
 
 
 # --- Caller errors map to 400 (the TypeWrightError family) ------------------

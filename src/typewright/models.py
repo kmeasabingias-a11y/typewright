@@ -48,6 +48,13 @@ class FunctionMetadata(BaseModel):
     decorators: list[str] = Field(default_factory=list)
     signature: str
     source: str
+    # Module-level import lines from the pasted code (Phase 10, D61). The parser captures only
+    # the function body in ``source``, so an ``import re`` written ABOVE the function is dropped;
+    # testgen re-emits these into the generated file so the function's imports actually run.
+    module_imports: list[str] = Field(default_factory=list)
+    # Top-level module names the function imports (anywhere). Used to detect dependencies the
+    # network-less sandbox can't provide and report them honestly instead of as a phantom crash.
+    imported_modules: list[str] = Field(default_factory=list)
 
 
 class PropertyClass(str, enum.Enum):
@@ -452,3 +459,8 @@ class AnalyzeResponse(BaseModel):
     bugs_found: list[Bug] = Field(default_factory=list)
     fix_suggestion: FixSuggestion | None = None
     metadata: AnalysisMetadata = Field(default_factory=AnalysisMetadata)
+    # Imports the function needs that the network-less sandbox can't provide (Phase 10, D61):
+    # non-stdlib packages outside the runtime image's allowlist. Non-empty means the tests were
+    # NOT executed here (they'd fail on a missing import) — they're returned to run elsewhere —
+    # so this is an honest "needs X" signal, never a phantom crash in bugs_found.
+    unavailable_imports: list[str] = Field(default_factory=list)

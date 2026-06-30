@@ -163,3 +163,20 @@ def test_parser_never_crashes_on_valid_function(name, params):
 
     assert meta.name == name
     assert [arg.name for arg in meta.args] == params
+
+
+def test_collects_module_imports_and_imported_modules():
+    """Module-level imports are captured for re-emission; all imported modules for the dep check (D61)."""
+    code = (
+        "import re\n"
+        "from math import sqrt\n\n"
+        "def f(x):\n"
+        "    import json\n"
+        "    return re.sub('a', 'b', json.dumps(sqrt(x)))\n"
+    )
+    meta = parse_function(code, "f")
+    assert "import re" in meta.module_imports
+    assert "from math import sqrt" in meta.module_imports
+    # in-body imports travel with the function source, so they're not re-emitted — but ARE counted
+    assert "import json" not in meta.module_imports
+    assert set(meta.imported_modules) >= {"re", "math", "json"}

@@ -117,7 +117,10 @@ def _assemble(meta: FunctionMetadata, plan: StrategyPlan, tests: GeneratedTests)
     """
     seen: set[str] = set()
     imports: list[str] = []
-    for line in (*_BASE_IMPORTS, *plan.extra_imports, *tests.extra_imports):
+    # meta.module_imports re-emits the pasted code's module-level imports (D61): the parser keeps
+    # only the function body in meta.source, so without these a function relying on a top-level
+    # `import re` would hit a NameError in the sandbox. Deduped against the base + LLM imports.
+    for line in (*_BASE_IMPORTS, *meta.module_imports, *plan.extra_imports, *tests.extra_imports):
         line = line.strip()
         if line and line not in seen:
             seen.add(line)

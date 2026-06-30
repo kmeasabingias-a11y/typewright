@@ -55,3 +55,11 @@ def test_run_tests_wraps_then_submits(monkeypatch):
     assert captured["timeout_seconds"] == 25.0
     assert captured["code"] == execution.wrap_for_sandbox(_SAMPLE_SOURCE)
     assert 'os.chdir("/tmp")' in captured["code"]
+
+
+def test_unavailable_imports_flags_only_non_sandbox_modules():
+    """stdlib + the allowlist are available; anything else is unavailable, in order (D61)."""
+    assert execution.unavailable_imports(["re", "math", "json"]) == []        # stdlib
+    assert execution.unavailable_imports(["numpy", "pandas", "yaml"]) == []   # allowlisted
+    assert execution.unavailable_imports(["tensorflow", "torch"]) == ["tensorflow", "torch"]
+    assert execution.unavailable_imports(["re", "scipy", "numpy"]) == ["scipy"]

@@ -41,6 +41,10 @@ _FALSIFYING = "Falsifying example: "
 _OPENERS = {"(": ")", "[": "]", "{": "}"}
 _CLOSERS = {")", "]", "}"}
 
+# A missing dependency in the network-less sandbox is an environment limit, NOT a bug in the
+# function — so an Import/ModuleNotFound failure is never reported as a finding (Phase 10, D61).
+_IMPORT_ERRORS = frozenset({"ModuleNotFoundError", "ImportError"})
+
 
 def _scan_balanced(text: str, open_idx: int) -> tuple[str, int]:
     """Return (inside-text, index-after-close) for the bracket group opening at ``open_idx``.
@@ -161,6 +165,8 @@ def parse_results(result: SandboxResult, analysis: PropertyAnalysis) -> BugRepor
             continue
         seen.add(name)
         error, severity = _classify(match.group("msg"))
+        if error in _IMPORT_ERRORS:
+            continue  # a missing sandbox dependency is not a function bug (D61)
         bugs.append(
             Bug(
                 test_name=name,

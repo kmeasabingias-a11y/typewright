@@ -22,9 +22,14 @@
 # uv.lock versions so the sandbox emits the same "FAILED …" / "Falsifying example:"
 # markers results.py text-scrapes.
 #
+# A small third-party allowlist is baked in too (D61) so a pasted function that imports a
+# common package actually runs instead of phantom-crashing on a missing import. The set is
+# mirrored in execution.SANDBOX_ALLOWLIST_IMPORTS — keep the two in sync. Anything outside it
+# is reported honestly ("needs X") rather than run. Bumped to :0.2 since the contents changed.
+#
 # Build (on the SAME Docker daemon Kestrel drives — for local WSL2, the host daemon):
-#   docker build -f docker/test-runtime.Dockerfile -t typewright-test-runtime:0.1 .
-# Then point Kestrel at it:  KESTREL_EXECUTOR_DOCKER_IMAGE=typewright-test-runtime:0.1
+#   docker build -f docker/test-runtime.Dockerfile -t typewright-test-runtime:0.2 .
+# Then point Kestrel at it:  KESTREL_EXECUTOR_DOCKER_IMAGE=typewright-test-runtime:0.2
 
 FROM python:3.12-slim
 
@@ -40,6 +45,17 @@ RUN pip install --no-cache-dir \
         pytest==9.0.3 \
         hypothesis==6.155.2
 
-# Fail the build early if the install is broken — proves `import pytest, hypothesis`
-# works. pip's system install is world-readable, so uid 65534 can import it at run time.
-RUN python -c "import pytest, hypothesis; print(pytest.__version__, hypothesis.__version__)"
+# Third-party allowlist (D61): the common packages a pasted function might import, baked in so
+# they run in the network-less sandbox. All ship manylinux wheels — no compiler/system libs.
+# Mirror this list in execution.SANDBOX_ALLOWLIST_IMPORTS (by import name).
+RUN pip install --no-cache-dir \
+        numpy \
+        pandas \
+        requests \
+        python-dateutil \
+        PyYAML \
+        more-itertools
+
+# Fail the build early if the install is broken — proves the imports work. pip's system install
+# is world-readable, so uid 65534 can import everything at run time.
+RUN python -c "import pytest, hypothesis, numpy, pandas, requests, dateutil, yaml, more_itertools; print(pytest.__version__, hypothesis.__version__)"

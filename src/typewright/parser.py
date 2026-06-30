@@ -50,7 +50,38 @@ def parse_function(code: str, function_name: str | None = None) -> FunctionMetad
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     ]
     node = _select_function(functions, function_name)
-    return _build_metadata(node, code)
+    module_imports, imported_modules = _collect_imports(tree, node)
+    return _build_metadata(node, code, module_imports, imported_modules)
+
+
+def _collect_imports(tree: ast.Module, node: FunctionNode) -> tuple[list[str], list[str]]:
+    """Gather (module_import_lines, imported_module_names) for the function (Phase 10, D61).
+
+    ``module_import_lines`` are the *top-level* absolute imports written above the function —
+    the parser drops these from the function source, so testgen re-emits them. ``imported_modules``
+    are the top-level module names imported at module level OR inside the function, used to detect
+    dependencies the sandbox can't satisfy. Relative imports (``from . import x``) are skipped:
+    they can't be resolved or carried into a standalone test file.
+    """
+    lines: list[str] = []
+    modules: set[str] = set()
+
+    def _record(stmt: ast.Import | ast.ImportFrom) -> None:
+        if isinstance(stmt, ast.Import):
+            for alias in stmt.names:
+                modules.add(alias.name.split(".")[0])
+        elif stmt.level == 0 and stmt.module:  # absolute from-import only
+            modules.add(stmt.module.split(".")[0])
+
+    for stmt in tree.body:  # module-level imports -> carried into the generated file
+        if isinstance(stmt, ast.Import) or (isinstance(stmt, ast.ImportFrom) and stmt.level == 0):
+            lines.append(ast.unparse(stmt))
+            _record(stmt)
+    for inner in ast.walk(node):  # imports inside the function travel with its source already
+        if isinstance(inner, (ast.Import, ast.ImportFrom)):
+            _record(inner)
+
+    return lines, sorted(modules)
 
 
 def _select_function(
@@ -70,7 +101,9 @@ def _select_function(
     return functions[0]
 
 
-def _build_metadata(node: FunctionNode, code: str) -> FunctionMetadata:
+def _build_metadata(
+    node: FunctionNode, code: str, module_imports: list[str], imported_modules: list[str]
+) -> FunctionMetadata:
     """Read every field we expose now (or will need later) from one function node."""
     return FunctionMetadata(
         name=node.name,
@@ -81,6 +114,8 @@ def _build_metadata(node: FunctionNode, code: str) -> FunctionMetadata:
         decorators=[ast.unparse(dec) for dec in node.decorator_list],
         signature=_build_signature(node),
         source=ast.get_source_segment(code, node) or "",
+        module_imports=module_imports,
+        imported_modules=imported_modules,
     )
 
 

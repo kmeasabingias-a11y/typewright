@@ -23,7 +23,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from .config import Settings, get_settings
 from .errors import CostBudgetExceededError, MonthlyBudgetExceededError, PipelineError, RateLimitedError, SandboxTimeoutError, SandboxUnavailableError, TypeWrightError
-from .execution import run_tests
+from .execution import run_tests, unavailable_imports
 from .fixgen import build_fix_file, finalize, suggest_fix
 from .generation import generate_strategies
 from .inference import infer_properties
@@ -434,11 +434,17 @@ def create_app() -> FastAPI:
                 if request.max_test_runtime_seconds is not None
                 else settings.kestrel_timeout_seconds
             )
-            with span("sandbox"):
-                sandbox_result = run(test_file, timeout_seconds=budget)
-                report = parse_results(sandbox_result, properties)
-            if report.timed_out:
-                raise SandboxTimeoutError(budget)
+            # If the function needs a package the network-less sandbox can't provide, don't run
+            # (it would only ImportError) — surface the generated tests + an honest note (D61).
+            unavailable = unavailable_imports(metadata.imported_modules)
+            if unavailable:
+                report = BugReport()
+            else:
+                with span("sandbox"):
+                    sandbox_result = run(test_file, timeout_seconds=budget)
+                    report = parse_results(sandbox_result, properties)
+                if report.timed_out:
+                    raise SandboxTimeoutError(budget)
 
             with span("verify"):
                 _maybe_verify_bugs(request, metadata, properties, report, verify, settings)
@@ -475,6 +481,7 @@ def create_app() -> FastAPI:
             bugs_found=report.bugs,
             fix_suggestion=fix_suggestion,
             metadata=analysis_metadata,
+            unavailable_imports=unavailable,
         )
         try:
             store.save(response)

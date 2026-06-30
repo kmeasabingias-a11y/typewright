@@ -21,9 +21,29 @@ drives pytest itself; its process exit code becomes pytest's (0 pass / 1 failure
 
 from __future__ import annotations
 
+import sys
+
 from .config import Settings, get_settings
 from .kestrel import SandboxResult, run_in_sandbox
 from .models import GeneratedTestFile
+
+# Third-party packages baked into the sandbox runtime image (docker/test-runtime.Dockerfile, D61),
+# as the IMPORT names a function would use. The network-less sandbox can't install anything, so
+# this allowlist is the only third-party that runs; anything else is reported as unavailable, not
+# as a phantom crash. Transitive deps (six, pytz, certifi, …) are listed so importing them directly
+# isn't false-flagged. MUST stay in sync with the pip installs in that Dockerfile.
+SANDBOX_ALLOWLIST_IMPORTS = frozenset({
+    "numpy", "pandas", "requests", "dateutil", "yaml", "more_itertools",
+    "six", "pytz", "tzdata", "certifi", "urllib3", "idna", "charset_normalizer",
+})
+
+# Everything importable in the sandbox: the full stdlib + the two test tools + the allowlist.
+_SANDBOX_AVAILABLE = frozenset(sys.stdlib_module_names) | {"pytest", "hypothesis"} | SANDBOX_ALLOWLIST_IMPORTS
+
+
+def unavailable_imports(imported_modules: list[str]) -> list[str]:
+    """The function's imports the sandbox can't provide (not stdlib, not in the allowlist; D61)."""
+    return [m for m in imported_modules if m not in _SANDBOX_AVAILABLE]
 
 # Prepended so every relative write lands on the writable tmpfs and Hypothesis neither
 # persists examples nor enforces a deadline under the constrained sandbox.

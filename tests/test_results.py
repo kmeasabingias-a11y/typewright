@@ -218,3 +218,19 @@ def test_falsifying_example_with_pytest_E_prefix_is_stripped():
     assert report.bugs[0].failing_input == "x='A'"
     assert report.bugs[0].error == "AssertionError"
     assert report.bugs[0].severity == BugSeverity.PROPERTY_VIOLATION
+
+
+def test_import_error_is_not_reported_as_a_bug():
+    """A missing sandbox dependency (ModuleNotFoundError) is an env limit, not a function bug (D61)."""
+    result = SandboxResult(
+        stdout=(
+            "FAILED main.py::test_idempotence - ModuleNotFoundError: No module named 'numpy'\n"
+            "1 failed in 0.10s\n"
+        ),
+        stderr="",
+        exit_code=1,
+        duration_ms=5,
+        timed_out=False,
+    )
+    report = results.parse_results(result, ANALYSIS)
+    assert report.bugs == []  # not surfaced as a phantom crash

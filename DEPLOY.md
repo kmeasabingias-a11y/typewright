@@ -32,7 +32,7 @@ running up your bill.
 From **this** repo's root — the sandbox runtime (pytest + hypothesis baked in):
 
 ```bash
-docker build -t typewright-test-runtime:0.1 -f docker/test-runtime.Dockerfile .
+docker build -t typewright-test-runtime:0.2 -f docker/test-runtime.Dockerfile .
 ```
 
 From the **Kestrel** repo's root — the Kestrel API image:
@@ -140,7 +140,7 @@ across the web and bot paths.
   (add `extra_hosts: ["host.docker.internal:host-gateway"]` to the `typewright`
   service):
   ```bash
-  KESTREL_EXECUTOR_DOCKER_IMAGE=typewright-test-runtime:0.1 \
+  KESTREL_EXECUTOR_DOCKER_IMAGE=typewright-test-runtime:0.2 \
   KESTREL_EXECUTE_TIMEOUT_SECONDS=60 KESTREL_EXECUTE_OUTPUT_CAP_BYTES=262144 \
   uv run --directory /path/to/Kestrel uvicorn kestrel.app:create_app --factory --port 8000
   ```

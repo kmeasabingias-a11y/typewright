@@ -76,7 +76,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # 3. Start Kestrel (the sandbox) — separate repo, needs Docker.
 #    The 60s execute-timeout override is required for test workloads.
 #    See running-test-workloads.md for the full recipe.
-KESTREL_EXECUTOR_DOCKER_IMAGE=typewright-test-runtime:0.1 \
+KESTREL_EXECUTOR_DOCKER_IMAGE=typewright-test-runtime:0.2 \
 KESTREL_EXECUTE_TIMEOUT_SECONDS=60 \
 uv run --directory /path/to/Kestrel \
 uvicorn kestrel.app:create_app --factory --port 8000
