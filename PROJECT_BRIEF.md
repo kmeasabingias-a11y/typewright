@@ -185,6 +185,14 @@ Each step is one specific LLM call with structured output — not a free-form ag
   `trust_forwarded_for` behind the tunnel, optional `--profile github` for the PR bot sharing one `runs.db`.
   *Exit: launch artifacts done AND the monthly cap enforced live* — cap criterion ✅ met; live host bring-up +
   the recorded demo are the remaining launch steps.
+  - **Precision hardening — bug verification (D60):** a batch bug-hunt eval over 49 real library functions
+    (2026-06-30) measured ~20% precision; the false positives were over-inferred properties (`uppercase('ß')`
+    length) and out-of-domain inputs (`flatten_iter(0)`). New `verify.py` adds a skeptical **second-opinion**
+    LLM verdict per reported bug — `property_is_contractual` ∧ `input_in_domain` → `is_real` — attaching a
+    `BugVerdict` to each `Bug.verification` (config `bug_verification_enabled`, default on; per-request
+    `verify_findings`). A *post-filter* (annotate-and-demote, never drops a bug), so recall is untouched; NOT
+    confidence-gating (D57). Implemented + 184 tests green (uncommitted); the 49-fn eval is the before/after
+    benchmark, deferred until API credit is recharged.
 
 ## 5. API specification
 

@@ -9,7 +9,7 @@ key is needed.
 """
 
 from typewright.errors import PipelineError
-from typewright.models import GeneratedTestFile, ProposedFix, PropertyAnalysis, StrategyPlan
+from typewright.models import BugVerdict, GeneratedTestFile, ProposedFix, PropertyAnalysis, StrategyPlan
 from typewright.kestrel import SandboxResult
 
 
@@ -410,6 +410,76 @@ def test_model_tier_is_passed_to_fix(make_client):
 
     assert resp.status_code == 200
     assert seen["tier"] == "premium"
+
+
+# --- Phase 10: bug verification (second-opinion precision filter; D60) -------
+
+
+def test_verification_attached_to_bugs(make_client):
+    """With verification on (default), each surfaced bug carries a BugVerdict (D60)."""
+    client = make_client(run=lambda tf, *, timeout_seconds, settings=None: _FAILING_RUN)
+    resp = client.post("/v1/analyze", json={"code": "def f(x):\n    return x"})
+
+    assert resp.status_code == 200
+    bug = resp.json()["bugs_found"][0]
+    assert bug["verification"] is not None
+    assert bug["verification"]["property_is_contractual"] is True
+    assert bug["verification"]["input_in_domain"] is True
+
+
+def test_verification_demotes_over_inference(make_client):
+    """A 'not contractual' verdict stays attached (the bug is demoted, never dropped — D60)."""
+    over_inferred = BugVerdict(
+        property_is_contractual=False, input_in_domain=True, reasoning="never promised"
+    )
+    client = make_client(
+        run=lambda tf, *, timeout_seconds, settings=None: _FAILING_RUN,
+        verify=lambda meta, detected, bug, *, model_tier=None: over_inferred,
+    )
+    resp = client.post("/v1/analyze", json={"code": "def f(x):\n    return x"})
+
+    assert resp.status_code == 200
+    bugs = resp.json()["bugs_found"]
+    assert len(bugs) == 1  # not dropped — still reported, just demoted
+    assert bugs[0]["verification"]["property_is_contractual"] is False
+
+
+def test_verification_can_be_disabled_per_request(make_client):
+    """verify_findings=false skips verification entirely; the verdict stays null (D60)."""
+    calls = {"n": 0}
+
+    def verify(meta, detected, bug, *, model_tier=None):
+        calls["n"] += 1
+        return BugVerdict(property_is_contractual=True, input_in_domain=True, reasoning="x")
+
+    client = make_client(
+        run=lambda tf, *, timeout_seconds, settings=None: _FAILING_RUN, verify=verify
+    )
+    resp = client.post(
+        "/v1/analyze", json={"code": "def f(x):\n    return x", "verify_findings": False}
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["bugs_found"][0]["verification"] is None
+    assert calls["n"] == 0  # the verify step was never called
+
+
+def test_verification_failure_degrades_not_500(make_client):
+    """A verification error leaves the bug unverified; the analysis stays valid (D44/D60)."""
+
+    def verify(meta, detected, bug, *, model_tier=None):
+        raise PipelineError("bug_verification", "judge unreachable")
+
+    client = make_client(
+        run=lambda tf, *, timeout_seconds, settings=None: _FAILING_RUN, verify=verify
+    )
+    resp = client.post("/v1/analyze", json={"code": "def f(x):\n    return x"})
+
+    assert resp.status_code == 200  # not a 500 — verification is best-effort
+    bugs = resp.json()["bugs_found"]
+    assert len(bugs) == 1  # the real analysis is intact
+    assert bugs[0]["verification"] is None  # left unverified
+
 
 # --- Caller errors map to 400 (the TypeWrightError family) ------------------
 

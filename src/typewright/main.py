@@ -36,6 +36,7 @@ from .models import (
     AnalyzeRequest,
     AnalyzeResponse,
     BugReport,
+    BugVerdict,
     FixSuggestion,
     FunctionMetadata,
     GeneratedTestFile,
@@ -50,6 +51,7 @@ from .results import parse_results
 from .store import RunStore, SqliteRunStore
 from .testgen import generate_test_file
 from .tracing import span, trace_scope
+from .verify import verify_bug
 from .web import INDEX_HTML
 from .webhook import parse_pull_request_event, verify_signature
 from .worker import enqueue as worker_enqueue
@@ -89,6 +91,15 @@ def get_suggest_fix() -> Callable[..., ProposedFix]:
     seam), so one mock covers both the initial run and the fix's verification re-run.
     """
     return suggest_fix
+
+
+def get_verify_bug() -> Callable[..., BugVerdict]:
+    """Dependency provider for the bug-verification LLM step (test seam, D60).
+
+    Mirrors ``get_suggest_fix``: only the LLM call is injected, so API tests run the
+    verification path with no live key. Best-effort — the route catches its failures.
+    """
+    return verify_bug
 
 
 def get_enqueue() -> Callable[[PullRequestJob], Awaitable[None]]:
@@ -182,6 +193,43 @@ def _maybe_suggest_fix(
         except (PipelineError, SandboxUnavailableError) as exc:
             logger.warning("fix verification inconclusive (sandbox failed): %s", exc)
     return finalize(proposed, verify_report)
+
+
+def _maybe_verify_bugs(
+    request: AnalyzeRequest,
+    meta: FunctionMetadata,
+    properties: PropertyAnalysis,
+    report: BugReport,
+    verify: Callable[..., BugVerdict],
+    settings: Settings,
+) -> None:
+    """Attach a second-opinion ``BugVerdict`` to each bug in place — best-effort (Phase 10, D60).
+
+    A precision post-filter on an already-valid ``bugs_found``: it never adds or removes bugs and
+    never touches detection/strategy, so recall is untouched (D60). Each bug gets one skeptical
+    LLM verdict (is the property contractual, is the input in-domain). Like the fix step (D44),
+    every failure degrades rather than failing the request: a per-bug ``PipelineError`` leaves THAT
+    bug unverified and moves on; a terminal cost/monthly-budget error stops verifying the rest
+    (further calls would only re-raise). Disabled entirely by config or the per-request override.
+    """
+    enabled = (
+        settings.bug_verification_enabled
+        if request.verify_findings is None
+        else request.verify_findings
+    )
+    if not enabled or not report.bugs:
+        return
+    by_relation = {p.relation: p for p in properties.detected}
+    for bug in report.bugs:
+        try:
+            bug.verification = verify(
+                meta, by_relation.get(bug.violated_property), bug, model_tier=request.model_tier
+            )
+        except (CostBudgetExceededError, MonthlyBudgetExceededError) as exc:
+            logger.warning("bug verification stopped (%s): %s", type(exc).__name__, exc)
+            return
+        except PipelineError as exc:
+            logger.warning("bug verification skipped for %s: %s", bug.test_name, exc)
 
 
 def create_app() -> FastAPI:
@@ -340,6 +388,7 @@ def create_app() -> FastAPI:
         gen_tests: Callable[..., GeneratedTestFile] = Depends(get_generate_test_file),
         run: Callable[..., SandboxResult] = Depends(get_run_tests),
         suggest: Callable[..., ProposedFix] = Depends(get_suggest_fix),
+        verify: Callable[..., BugVerdict] = Depends(get_verify_bug),
         store: RunStore = Depends(get_run_store),
         limiter: RateLimiter = Depends(get_rate_limiter),
         settings: Settings = Depends(get_settings),
@@ -391,6 +440,9 @@ def create_app() -> FastAPI:
             if report.timed_out:
                 raise SandboxTimeoutError(budget)
 
+            with span("verify"):
+                _maybe_verify_bugs(request, metadata, properties, report, verify, settings)
+
             with span("fix"):
                 fix_suggestion = _maybe_suggest_fix(
                     request, metadata, properties, test_file, report, budget, suggest, run
@@ -398,6 +450,9 @@ def create_app() -> FastAPI:
 
             trace.set(
                 bugs=len(report.bugs),
+                confirmed_bugs=sum(
+                    1 for b in report.bugs if b.verification is not None and b.verification.is_real
+                ),
                 llm_cost_usd=round(meter.total_usd, 6),
                 llm_calls=meter.calls,
                 tests_generated=len(test_file.test_names),

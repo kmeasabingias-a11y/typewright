@@ -13,8 +13,10 @@ from typewright.main import (
     get_run_store,
     get_run_tests,
     get_suggest_fix,
+    get_verify_bug,
 )
 from typewright.models import (
+    BugVerdict,
     DetectedProperty,
     GeneratedStrategy,
     GeneratedTestFile,
@@ -80,6 +82,13 @@ SAMPLE_PROPOSED_FIX = ProposedFix(
     explanation="example fix",
 )
 
+# Default bug verdict: confirms the finding (so bug-surfacing API tests keep their bugs).
+SAMPLE_VERDICT = BugVerdict(
+    property_is_contractual=True,
+    input_in_domain=True,
+    reasoning="the property is part of the contract and the input is in-domain",
+)
+
 
 def _default_infer(meta, *, model_tier=None) -> PropertyAnalysis:
     return SAMPLE_ANALYSIS
@@ -101,6 +110,10 @@ def _default_suggest(meta, report, *, model_tier=None) -> ProposedFix:
     return SAMPLE_PROPOSED_FIX
 
 
+def _default_verify(meta, detected, bug, *, model_tier=None) -> BugVerdict:
+    return SAMPLE_VERDICT
+
+
 @pytest.fixture
 def make_client():
     """Factory for a TestClient whose five pipeline steps are all mocked.
@@ -119,6 +132,7 @@ def make_client():
         gen_tests=_default_testgen,
         run=_default_run,
         suggest=_default_suggest,
+        verify=_default_verify,
         store=None,
         rate_limiter=None,
     ) -> TestClient:
@@ -129,6 +143,7 @@ def make_client():
         app.dependency_overrides[get_generate_test_file] = lambda: gen_tests
         app.dependency_overrides[get_run_tests] = lambda: run
         app.dependency_overrides[get_suggest_fix] = lambda: suggest
+        app.dependency_overrides[get_verify_bug] = lambda: verify
         app.dependency_overrides[get_run_store] = lambda: run_store
         if rate_limiter is not None:
             app.dependency_overrides[get_rate_limiter] = lambda: rate_limiter

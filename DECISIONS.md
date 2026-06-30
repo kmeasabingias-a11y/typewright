@@ -915,3 +915,38 @@ The containerized auth-off Kestrel is the one piece not yet exercised live (the 
 process); DEPLOY.md's troubleshooting documents that exact host-process form as a verified fallback. **Status:
 artifacts authored 2026-06-30 (`docker compose config`-validated, both profiles); live bring-up on a host is
 the remaining verification, then the recorded demo (the last launch step).**
+
+### D60 — Adversarial bug-verification stage: a second-opinion precision filter
+**Decision:** Add a post-filter that gives every reported bug a skeptical **second-opinion verdict** before
+it's surfaced. A new `verify.py` `verify_bug(meta, detected, bug)` makes one structured LLM call (stage
+`bug_verification`, via the shared `complete` chokepoint) returning a `BugVerdict` with two independent
+judgments — `property_is_contractual` (is the violated property genuinely guaranteed by the function's
+docstring/name/signature, vs. a speculative generalization?) and `input_in_domain` (is the failing input one
+the function is meant to accept?) — plus `reasoning`; `is_real` is derived in code as the AND of the two. The
+route runs it after `parse_results` as a 6th injected seam (`get_verify_bug`) inside a `verify` span, attaching
+a verdict to each `Bug.verification` **in place**. Config `bug_verification_enabled` (default **True**) with a
+per-request `verify_findings` override. **Annotate-and-demote, never drop (key choice):** verification never
+adds or removes a bug and never touches detection/strategy/testgen — it only labels, so the engine's recall is
+untouched; presentation layers split confirmed vs. "possible (unverified)". **Best-effort (mirrors D44):** a
+per-bug `PipelineError` leaves that bug unverified and moves on; a terminal cost/monthly-budget error stops
+verifying the rest — verification never turns a valid analysis into a 500/402/503.
+**Why:** the batch bug-hunt eval (2026-06-30) ran 49 real library functions and flagged 15, of which only 3
+were real (precision ~20%); the 12 false positives split cleanly into two classes — **over-inferred properties**
+the function never promised (`uppercase('ß')` doesn't preserve length; `under2camel` was never idempotent) and
+**out-of-domain inputs** (`flatten_iter(0)` on a non-iterable). Those are exactly the two questions the verdict
+asks, so it automates the hand-triage that separated real from fake. **This is deliberately NOT
+confidence-gating, which D57 rejected:** the false metamorphic `slugify(s)==slugify(s.upper())` and the genuine
+`absolute(x)==absolute(-x)` both scored 0.90, so "does the property hold?" can't separate them — but "is the
+property *contractual* and the input *in-domain*?" is a different, separable signal. **Post-filter, not a
+detection change**, because the project's stance is precision-over-coverage (§8) and recall must not regress —
+so we suppress (demote) low-groundedness reports rather than narrow what gets found. **Anti-circularity:** the
+detector and judge share a model family, mitigated by a deliberately different skeptical task framing, the
+forced two-question decomposition, and few-shot grounding in the eval's real cases (ß reject, `flatten_iter`
+reject, `to_text`/`absolute` confirm); running the judge at a different tier is a deferred option if the
+benchmark shows it re-confirming its own over-inferences. **Honest limits:** the judge is an LLM (the subtle ß
+case may slip), it can wrongly demote a real bug (mitigated by annotate-not-drop), and it's only as good as the
+docstring. **Measurable:** the 49-function eval is now a labelled benchmark (3 real / 12 FP), so the change is a
+before/after experiment (run with `bug_verification_enabled` off, then on). **Scope:** wired into `/v1/analyze`
+only (where the web demo + the benchmark run); the worker/PR-bot path + the web/comment two-tier UI are a noted
+follow-on. **Status: implemented 2026-06-30 (184 tests green, uncommitted); before/after benchmark deferred
+until the operator recharges API credit.**

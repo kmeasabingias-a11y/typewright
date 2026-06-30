@@ -93,6 +93,13 @@ class Settings(BaseSettings):
     # over. Set to 0 (or negative) to disable the monthly cap. Both the web and worker processes
     # must share the same runs_db_path for one global counter.
     max_monthly_cost_usd: float = 10.00
+    # --- Bug verification (Phase 10, D60): second-opinion precision filter ---
+    # When True (default), each reported bug gets a skeptical second-opinion LLM verdict — is the
+    # violated property contractual, and is the failing input in-domain? — to suppress the
+    # over-inference/out-of-domain false positives the bug-hunt eval surfaced. Best-effort: a
+    # verification failure leaves the bug unverified, never fails the analysis. A request's
+    # verify_findings overrides this. Adds +1 LLM call per bug found (0 when an analysis is clean).
+    bug_verification_enabled: bool = True
     # --- Rate limiting (Phase 9, D53) ---
     # Per-IP on /v1/analyze and per-installation on the webhook; 429 + Retry-After. Backend "memory"
     # (default, per-process — fine for one instance) or "redis" (shared across replicas, uses redis_url).

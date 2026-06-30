@@ -190,13 +190,55 @@ class BugSeverity(str, enum.Enum):
     PROPERTY_VIOLATION = "property_violation"  # an asserted relation failed — a silent wrong answer
 
 
+class BugVerdict(BaseModel):
+    """A second-opinion verdict on one reported bug (Phase 10, D60).
+
+    A *skeptical* judge re-examines a finding along the two axes that separate a real bug from
+    an over-inference (the empirical failure modes from the bug-hunt eval): whether the violated
+    property is genuinely part of the function's contract, and whether the failing input is in
+    the function's intended domain. A finding is real only when BOTH hold (``is_real``). This is
+    NOT confidence-gating (D57): confidence asks "does the property hold?"; these ask "is the
+    property *contractual* and the input *in-domain*?" — the signal confidence could not provide.
+
+    Only the two booleans + ``reasoning`` come from the model; ``is_real`` is derived in code, so
+    the label can never disagree with the judgments it's built from.
+    """
+
+    property_is_contractual: bool = Field(
+        ...,
+        description=(
+            "Is the violated property genuinely guaranteed by the function's contract "
+            "(its docstring, name, and signature), rather than a speculative generalization the "
+            "function never promised (e.g. case-insensitivity, length-preservation, idempotence)?"
+        ),
+    )
+    input_in_domain: bool = Field(
+        ...,
+        description=(
+            "Is the failing input one the function is actually meant to accept (within its "
+            "intended domain), rather than out-of-domain (e.g. a non-iterable to a flatten "
+            "function), where raising is acceptable?"
+        ),
+    )
+    reasoning: str = Field(
+        ..., description="One or two sentences justifying the two judgments above. Brief."
+    )
+
+    @property
+    def is_real(self) -> bool:
+        """A confirmed bug needs a contractual property violated on an in-domain input."""
+        return self.property_is_contractual and self.input_in_domain
+
+
 class Bug(BaseModel):
     """One falsified property: the test that failed, the input that broke it, and how badly.
 
     Phase 5 (D40). ``failing_input`` is the argument text from Hypothesis's falsifying
     example (e.g. ``"v=''"`` or ``"x=0, y=3"``); ``error`` is the exception type
     (``"AssertionError"`` for a violated relation, else the crash type, e.g. ``"IndexError"``);
-    ``violated_property`` is the detected relation the test was asserting.
+    ``violated_property`` is the detected relation the test was asserting. ``verification`` is the
+    optional second-opinion verdict (Phase 10, D60) — ``None`` when verification is disabled, the
+    finding wasn't checked, or the check degraded (best-effort, never fails the analysis).
     """
 
     test_name: str
@@ -204,6 +246,7 @@ class Bug(BaseModel):
     error: str
     violated_property: str
     severity: BugSeverity
+    verification: BugVerdict | None = None
 
 
 class BugReport(BaseModel):
@@ -362,6 +405,14 @@ class AnalyzeRequest(BaseModel):
             "Per-analysis LLM-cost ceiling in USD (Phase 9). Optional; falls back to the configured "
             "default and is clamped down to the server's max (a request can only lower it, not raise "
             "it). Crossing it aborts the analysis with 402 (D52)."
+        ),
+    )
+    verify_findings: bool | None = Field(
+        default=None,
+        description=(
+            "Per-request override for the second-opinion bug-verification step (Phase 10, D60). "
+            "Optional; falls back to the server's bug_verification_enabled. When on AND bugs are "
+            "found, each bug gets a BugVerdict (best-effort, +1 LLM call per bug)."
         ),
     )
 
