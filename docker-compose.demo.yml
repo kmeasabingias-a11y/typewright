@@ -6,9 +6,10 @@
 # why this can't live on a one-click PaaS and needs a host you control.
 #
 # Public access is via an on-demand Cloudflare quick tunnel (see DEPLOY.md), NOT a
-# directly-open port: TypeWright is published on 127.0.0.1 only. All three launch
-# guards are on — per-IP rate limit (D53), per-analysis $0.50 cap (D52), and the
-# global monthly cap (D58, default $10) — so a persistent URL is defensible.
+# directly-open port: TypeWright is published on 127.0.0.1 only. Every launch guard
+# is on — per-IP rate limit (D53), per-analysis $0.50 cap (D52), the global monthly
+# cap (D58, $10) and the daily sub-cap (D62, $2) — so a persistent URL is defensible.
+# Optionally set TYPEWRIGHT_DEMO_ACCESS_CODE to gate the endpoint entirely (D62).
 #
 # PREREQUISITES (DEPLOY.md walks through these):
 #   1. docker build -t typewright-test-runtime:0.2 -f docker/test-runtime.Dockerfile .   # in THIS repo
@@ -49,7 +50,11 @@ services:
       TYPEWRIGHT_KESTREL_TIMEOUT_SECONDS: "45"   # <= Kestrel's 60s ceiling
       TYPEWRIGHT_RUNS_DB_PATH: "/data/runs.db"   # bind volume -> links + monthly cap survive redeploys
       TYPEWRIGHT_MAX_MONTHLY_COST_USD: "10.00"   # global LLM-spend backstop (D58); lower to taste
+      TYPEWRIGHT_MAX_DAILY_COST_USD: "2.00"      # daily brake (D62): one bad day can't burn the month
       TYPEWRIGHT_MAX_COST_USD: "0.50"            # per-analysis cap (D52)
+      # Optional kill-switch (D62): set a value and share links as https://<host>/?code=<value>.
+      # Leave empty for an open demo; flip it on if the URL ever attracts abuse.
+      TYPEWRIGHT_DEMO_ACCESS_CODE: "${TYPEWRIGHT_DEMO_ACCESS_CODE:-}"
       TYPEWRIGHT_TRUST_FORWARDED_FOR: "true"     # the Cloudflare tunnel is a trusted proxy -> real client IP
       TYPEWRIGHT_LOG_FORMAT: "json"              # structured logs for an aggregator (D54)
       # Only used by --profile github (harmless/empty otherwise):
@@ -77,8 +82,9 @@ services:
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:?}"
       TYPEWRIGHT_KESTREL_BASE_URL: "http://kestrel:8000"
       TYPEWRIGHT_KESTREL_TIMEOUT_SECONDS: "45"
-      TYPEWRIGHT_RUNS_DB_PATH: "/data/runs.db"   # SAME volume as the web app -> one shared monthly counter (D58)
+      TYPEWRIGHT_RUNS_DB_PATH: "/data/runs.db"   # SAME volume as the web app -> one shared counter (D58/D62)
       TYPEWRIGHT_MAX_MONTHLY_COST_USD: "10.00"
+      TYPEWRIGHT_MAX_DAILY_COST_USD: "2.00"
       TYPEWRIGHT_MAX_COST_USD: "0.50"
       TYPEWRIGHT_REDIS_URL: "redis://redis:6379"
       TYPEWRIGHT_GITHUB_APP_ID: "${TYPEWRIGHT_GITHUB_APP_ID:-}"

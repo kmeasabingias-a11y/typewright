@@ -13,10 +13,19 @@ no caps). That "docker-out-of-docker" design needs a host where you control the
 daemon — a one-click PaaS won't give you the socket. Any Linux box with Docker
 (a small VPS, or your own machine) works.
 
-Three guards make a public URL safe to expose: per-IP rate limiting (10/min),
-a per-analysis cost cap ($0.50 → 402), and a **global monthly LLM-spend cap**
-($10 → 503). The monthly cap is the backstop against an unauthenticated demo
-running up your bill.
+Four guards make a public URL safe to expose: per-IP rate limiting (10/min), a
+per-analysis cost cap ($0.50 → 402), a **global monthly LLM-spend cap** ($10 →
+503), and a **daily sub-cap** ($2 → 503). The monthly cap is the backstop against
+an unauthenticated demo running up your bill; the daily one stops a single bad
+day from consuming the whole month and leaving the demo dead for weeks — it
+clears at the next UTC midnight. Under either cap, **reads stay open**: the page
+loads and shared `?run=` links still resolve; only new analyses pause.
+
+A fifth guard is available but **off by default**: set
+`TYPEWRIGHT_DEMO_ACCESS_CODE` and every analyze call must carry it. Share the
+demo as `https://<host>/?code=<value>` — the page forwards the code and keeps it
+on the share links it generates, so a visitor with the link notices nothing while
+a scraper without it gets a 403. Turn it on if the URL ever attracts abuse.
 
 ## Prerequisites
 
@@ -99,14 +108,17 @@ visitor, not the tunnel.
 
 ## Operations
 
-- **Lower the monthly cap:** edit `TYPEWRIGHT_MAX_MONTHLY_COST_USD` in the compose
-  file and `docker compose -f docker-compose.demo.yml up -d typewright`.
-- **Reset this month's counter:**
+- **Change a cap:** edit `TYPEWRIGHT_MAX_MONTHLY_COST_USD` / `TYPEWRIGHT_MAX_DAILY_COST_USD`
+  in the compose file and `docker compose -f docker-compose.demo.yml up -d typewright`
+  (set either to `0` to disable it).
+- **Reset a counter:**
   ```bash
   docker run --rm -v /var/typewright/data:/data nouchka/sqlite3 \
-    /data/runs.db "DELETE FROM monthly_cost;"
+    /data/runs.db "DELETE FROM monthly_cost; DELETE FROM daily_cost;"
   ```
-  (or `sudo sqlite3 /var/typewright/data/runs.db "DELETE FROM monthly_cost;"`).
+  (or `sudo sqlite3 /var/typewright/data/runs.db "DELETE FROM daily_cost;"`).
+- **Gate the demo:** set `TYPEWRIGHT_DEMO_ACCESS_CODE=<value>` in the compose file,
+  restart `typewright`, and share `https://<host>/?code=<value>`. Unset it to reopen.
 - **Logs:** `docker compose -f docker-compose.demo.yml logs -f typewright`
   (JSON lines — one `event=analysis_trace …` summary per analysis).
 - **Tear down:** `docker compose -f docker-compose.demo.yml down`
@@ -132,8 +144,11 @@ across the web and bot paths.
 - **`volume … main.py: no such file`** from a sandbox run: the spool dir isn't at
   an identical host:container path — confirm `KESTREL_EXEC_SPOOL_DIR=/var/kestrel/spool`
   matches the bind mount.
-- **All analyses 503:** the monthly cap is hit (`spent ≥ limit`). Raise it or clear
-  the counter (Operations).
+- **All analyses 503:** a spend cap is hit (`spent ≥ limit`). The body's `period`
+  field says which — `daily` clears at the next UTC midnight, `monthly` at the 1st.
+  Raise the cap or clear that counter (Operations).
+- **All analyses 403:** `TYPEWRIGHT_DEMO_ACCESS_CODE` is set and the request has no
+  matching code — open the demo via `…/?code=<value>`, or unset the variable.
 - **Fallback — Kestrel as a host process:** if the containerized Kestrel gives you
   trouble, run it on the host instead (the exact form verified in the live smoke)
   and point TypeWright at it with `TYPEWRIGHT_KESTREL_BASE_URL=http://host.docker.internal:8000`

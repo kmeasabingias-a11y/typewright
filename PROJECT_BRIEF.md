@@ -203,6 +203,32 @@ Each step is one specific LLM call with structured output — not a free-form ag
     `results.parse_results` never reports an import error as a bug. "Make all third-party run" was rejected as
     impossible/insecure (can't bake all of PyPI; JIT `pip install` on a public endpoint = RCE/supply-chain hole).
     190 tests green; numpy/pandas verified running under Kestrel's locked-down flags (uncommitted).
+  - **Launch cost controls (D62):** a **daily** sub-cap beside the monthly one. `MonthlyCostMeter`
+    generalised to `PeriodCostMeter`; new `DailyCostMeter` (`daily_cost` table, `YYYY-MM-DD` key)
+    pre-checked and billed at the same chokepoint, config `max_daily_cost_usd` (default **2.00**, 0
+    disables). Either ceiling → the same **503**, now carrying a `period` field and a `Retry-After` of
+    that period's rollover. The monthly cap bounds the *bill*; the daily cap bounds **denial of demo** —
+    one abuser burning the month in an afternoon — and self-heals at UTC midnight, with reads (`GET /`,
+    `/v1/runs/{id}`) open throughout so shared links keep resolving. Plus an optional **access gate**:
+    `demo_access_code` (unset = open, unchanged) → `POST /v1/analyze` needs `X-Demo-Access-Code` or
+    `?code=`, else **403**; the demo page forwards it from its own URL and keeps it on share links, so
+    the code rides in the link with zero friction. 196 tests green.
+  - **Model tiers refreshed (D63):** `standard` → `anthropic/claude-sonnet-5`, `premium` →
+    `anthropic/claude-opus-5` (config-only; the D17 tier indirection exists for this). Sonnet 5 is both
+    stronger on code reasoning and cheaper than Sonnet 4.6 at introductory pricing, so the public demo
+    runs the better model rather than economising on inference quality. **Caveat:** every published
+    measurement (D57, D60, the ~20% precision figure) was taken on Sonnet 4.6. **Live-verified
+    2026-08-16:** buggy `absolute` → 200 in 20.4s, both real bugs found *and* confirmed by the D60
+    verifier, verified fix (5 passed / 0 failed), $0.0396. Getting there required **D65** — current
+    Claude models **reject `temperature`** (400 "deprecated for this model"), so `llm_temperature`
+    now defaults to `None` and the parameter is omitted unless explicitly configured. The unit suite
+    could not have caught this: the client fakes accept any kwargs, and LiteLLM's capability map
+    still claims these models support sampling parameters.
+  - **Launch framing (D64):** the demo page now leads with the **verified fix** (the executed, grounded
+    half of a result) above the inferred-property findings, renders `unavailable_imports` so a
+    sandbox-skipped run reads as "not checked" rather than "no bugs", reframes the header as *an AI
+    property-based test generator*, and publishes the measured precision (49 swept / 15 flagged / 3
+    confirmed) in a "How reliable is this?" note.
 
 ## 5. API specification
 
@@ -266,9 +292,11 @@ honest-null rather than a fabricated count (D5/D40).
 
 **Status codes:** 200 (analysis complete; `bugs_found` may be empty) · 400 (code doesn't
 parse, or `function_name` not found) · **402 (exceeded the `max_cost_usd` budget — body carries
-`spent_usd`/`limit_usd`, D52)** · 429 (rate limit) · 500 (pipeline failure — body
-includes the failing `stage`) · **503 (sandbox temporarily unavailable — `Retry-After`, D55)** ·
-504 (exceeded `max_test_runtime_seconds`). `code` is capped at 100,000 chars (→ 422, D55).
+`spent_usd`/`limit_usd`, D52)** · **403 (demo access code required/invalid, when
+`demo_access_code` is configured — D62)** · 429 (rate limit) · 500 (pipeline failure — body
+includes the failing `stage`) · **503 (sandbox temporarily unavailable — `Retry-After`, D55; or the
+service's global monthly/daily LLM budget is exhausted — body carries `spent_usd`/`limit_usd`/`period`,
+D58/D62)** · 504 (exceeded `max_test_runtime_seconds`). `code` is capped at 100,000 chars (→ 422, D55).
 
 `max_cost_usd` (optional request field, Phase 9 D52) is the per-analysis LLM-cost ceiling in USD;
 it can only **lower** the server's configured cap (`min(request, config)`), and crossing it aborts

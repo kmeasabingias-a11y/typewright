@@ -980,3 +980,90 @@ flags (`--read-only --user 65534 --network none`, tmpfs `/tmp`) at zero LLM cost
 2026-06-30 (190 tests green; image built + sandbox-verified; uncommitted). Image bumped `:0.1`→`:0.2`; deploy
 refs (compose/DEPLOY/README) updated. Remaining: a live `/v1/analyze` round-trip on a numpy function (deferred to
 save credit — covered by the unit wiring + the sandbox check).**
+
+### D62 — Launch cost controls: a daily sub-cap and an optional demo access gate
+**Decision:** Two additions before opening a public URL. (1) **Daily cap.** `MonthlyCostMeter` was
+generalised into `PeriodCostMeter` (table/column/period key are subclass hooks) with two concrete
+meters: `MonthlyCostMeter` (`monthly_cost`, `YYYY-MM`, unchanged) and a new `DailyCostMeter`
+(`daily_cost`, `YYYY-MM-DD`), both pre-checked and billed at the same `llm.complete` chokepoint via
+`_budget_meters(settings)`. Config `max_daily_cost_usd` defaults to **2.00** (0 disables, like the
+monthly cap). Exhausting either raises `MonthlyBudgetExceededError` — which now carries a `period`
+label ("Monthly"/"Daily") echoed in the 503 body — with `Retry-After` set to that period's rollover.
+(2) **Access gate.** New `demo_access_code`; when set, `POST /v1/analyze` requires it via the
+`X-Demo-Access-Code` header or a `?code=` query param, else **403** (plain `HTTPException`, as D50's
+404). Unset (the default) leaves the endpoint open, so local dev, tests, and the existing deployment
+are unchanged. The demo page reads `?code=` from its own URL, forwards it as a header on every
+analyze call, and preserves it on the generated share link — so the code rides in the link and a
+recruiter clicking it notices nothing.
+**Why:** D58's monthly cap already makes the *bill* unlosable (pre-call check → 503 at $0 spend), so
+the residual risk on a public URL was never overspend — it was **denial of demo**: one abusive caller
+burning the whole month's budget in an afternoon and leaving the demo returning 503 for weeks, exactly
+when a recruiter clicks. A daily sub-cap bounds the blast radius of a bad day and *self-heals at the
+next UTC midnight*; reads (`GET /`, `/v1/runs/{id}`) stay open under both caps, so shared results keep
+resolving while new analyses are paused. Rate limiting (D53) was kept as the first line but is not
+sufficient alone — IPs rotate. The access gate is deliberately **off by default and link-shaped**
+rather than a login: a portfolio demo dies from friction, so the code lives in the URL, giving a
+one-flip kill-switch if the link is ever abused without asking an honest visitor to type anything.
+Ordering matters: the rate limit is enforced *before* the code check, so guessing the code is throttled
+like any other traffic. **Status: implemented 2026-08-16 (196 tests green; compose sets $2/day and
+passes `TYPEWRIGHT_DEMO_ACCESS_CODE` through).**
+
+### D63 — Refresh the model tiers to the current catalog (Sonnet 5 standard, Opus 5 premium)
+**Decision:** `model_standard` moves `anthropic/claude-sonnet-4-6` → **`anthropic/claude-sonnet-5`**
+and `model_premium` `anthropic/claude-opus-4-8` → **`anthropic/claude-opus-5`**. Economy stays on
+Haiku 4.5. No code change beyond the two config defaults — the tier indirection (D17) exists for this.
+**Why:** the demo is the portfolio piece, so the default tier should be the strongest model that fits
+the budget, and Sonnet 5 is both **better** on code reasoning than Sonnet 4.6 and **cheaper right now**
+($2/$10 per MTok on introductory pricing through 2026-08-31, versus $3/$15) — quality and cost point
+the same way, which is rare enough to take. Downgrading the public demo to Haiku to stretch the budget
+was considered and rejected: property *inference* is already the weakest stage (D57/D60), so buying
+budget with worse inferred properties would degrade exactly what visitors judge. The caps (D52/D58/D62)
+bound spend instead. Verified LiteLLM 1.88.1 prices both new IDs, which matters more than it looks:
+`metrics._response_cost` degrades to `0.0` on a price-map miss, so a model LiteLLM cannot price would
+bill $0 and **silently disable every cost cap**. Any future tier change must re-check that first.
+**Caveat:** all prior evaluation (the D57 disclaimer, D60 verification, the 49-function bug hunt, the
+~20% precision figure) was measured on Sonnet 4.6; the published number is therefore a Sonnet-4.6
+measurement quoted for a Sonnet-5 deployment. **Status: implemented + LIVE-VERIFIED 2026-08-16.** The
+pre-launch smoke initially failed (see D65) and, once fixed, passed end-to-end on Sonnet 5: buggy
+`absolute` → HTTP 200 in 20.4s, 5 properties detected, 5 tests generated and run, **both real bugs
+found** (`absolute(x) >= 0` on `x=-1`; `absolute(x) == absolute(-x)` on `x=1`), **both confirmed** by
+the D60 verifier, and a **verified fix** (`return x if x >= 0 else -x`, 5 passed / 0 failed) — $0.0396,
+6 LLM calls, and no false positive this run.
+
+### D65 — Stop sending `temperature`: current Claude models reject sampling parameters
+**Decision:** `llm_temperature` becomes `float | None` defaulting to **None**, and `llm.complete` adds
+`temperature` to the request kwargs **only when it is not None**. Sending a float still works for a
+pinned older model; the default request carries no sampling parameter at all.
+**Why:** found by the pre-launch live smoke, not by the test suite. The first real analysis on Sonnet 5
+died at `property_detection` with `400 invalid_request_error: "temperature is deprecated for this
+model"` — the current Claude generation (Sonnet 5 / Opus 5 and the 4.7+ family) **removed** sampling
+parameters, so passing `temperature=0.0` is now an error rather than a hint. Every one of the 197 unit
+tests passed while the live pipeline was broken, because the hand-written client fakes accept any
+kwargs — a reminder that the mocked seam cannot validate the provider contract. **This could not be
+delegated to LiteLLM:** `get_supported_openai_params()` still reports `temperature` as supported for
+these models (verified on 1.88.1), so a capability lookup would have kept sending it; a hardcoded list
+of rejecting models would rot with every release. Omitting-by-default is the forward-compatible choice —
+it is correct for every current model and stays correct for future ones, while an operator pinning an
+older model can opt back in. The cost is that D17's "low temperature curbs fabrication" lever is gone
+for the standard tier; determinism now rests on the structured-output schema (Instructor) and the
+prompts, which is the direction Anthropic's own guidance points (steer with prompting, not sampling).
+**Status: implemented + live-verified 2026-08-16 (198 tests green; the smoke that failed on the old
+behaviour passed after the fix).**
+
+### D64 — Launch framing: lead with the verified fix, show skipped runs, publish the precision number
+**Decision:** A copy/UX pass on the demo page (no engine change). (1) The header reframes TypeWright as
+**"an AI property-based test generator"** whose fix is *proved by re-running the same tests*, rather than
+a bug finder. (2) `render()` now hoists a **verified** fix above the findings list (an unverified one
+stays at the bottom), via a new `fixBlock(fix)` helper. (3) `unavailable_imports` (D61) is finally
+rendered: a run whose sandbox was skipped says so and warns that an empty result means "not checked",
+not "no bugs" — the API has returned this field since D61 while the page silently dropped it. (4) A
+collapsible **"How reliable is this?"** note states the measured numbers: 49 functions swept, 15 flagged,
+3 confirmed (~20% precision), the two dominant false-positive classes, and run-to-run variance.
+**Why:** the D60 benchmark established that the honest description of this tool is an *exploratory
+candidate generator*, and the two halves of a result do not have equal standing — a verified fix was
+actually executed, while a finding is an inference that may be about a property the function never
+promised. The page presented both with the same confidence and buried the grounded half at the bottom.
+Publishing the unflattering precision number is a deliberate credibility trade: a reviewer who discovers
+a ~20% false-positive rate themselves concludes the tool overclaims, whereas one who is told up front
+concludes the author measured it. **Status: implemented 2026-08-16 (196 tests green; `test_web.py`
+asserts all three new surfaces).**
