@@ -131,11 +131,16 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 20
         <li><b>A finding is a hypothesis.</b> It says an AI-inferred property was violated — the
         property itself may be one your function never promised.</li>
     </ul>
-    <p>Measured on a hand-labelled sweep of 49 functions from real pure-Python libraries: 15
-        findings flagged, <b>3 confirmed as genuine bugs</b> after manual review (~20% precision).
-        The failure modes are over-inferred properties (e.g. assuming case-folding round-trips,
-        which Unicode breaks) and inputs outside a function's real domain. Results also vary
-        between runs on the same input. Treat every finding as a lead to check, not a verdict.</p>
+    <p>Measured on a hand-labelled sweep of 49 functions from real pure-Python libraries, run
+        <b>twice on the model this demo uses</b>: 15 findings flagged each time, of which 2 and 3
+        were confirmed genuine after manual review — <b>13–20% precision</b>. Two thirds of the
+        flagged set reproduced between runs; the same core bugs were found both times, but the
+        tail varies. The failure modes are over-inferred properties (e.g. assuming case-folding
+        round-trips, which Unicode breaks) and inputs outside a function's real domain. Treat
+        every finding as a lead to check, not a verdict.</p>
+    <p>The bugs it has actually found this way are real and still unfixed upstream — including an
+        unhandled <code>ZeroDivisionError</code> in a widely-used utility library, on an input that
+        library's own validation explicitly accepts.</p>
     </details>
 </footer>
 

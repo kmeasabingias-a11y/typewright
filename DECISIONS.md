@@ -1067,3 +1067,38 @@ Publishing the unflattering precision number is a deliberate credibility trade: 
 a ~20% false-positive rate themselves concludes the tool overclaims, whereas one who is told up front
 concludes the author measured it. **Status: implemented 2026-08-16 (196 tests green; `test_web.py`
 asserts all three new surfaces).**
+
+### D66 — Re-measure precision on the shipped model; publish a range, not a point
+**Decision:** Re-ran the 49-function hand-labelled benchmark **twice** on Sonnet 5 (the model D63
+ships) and replaced the demo's published figure with the measured **13–20% precision** range plus the
+run-to-run overlap, rather than quoting June's single Sonnet-4.6 number.
+**Why:** D63 changed the model, which invalidated the provenance of the ~20% figure the demo was about
+to publish. Two runs rather than one because D60 established that a single sweep is not reproducible —
+quoting one number would repeat the false precision that experiment already discredited.
+**Results (49 fns each, verification on, every flag hand-verified, $4.90 total):** run 1 — 15 flagged,
+2 real, **13%**; run 2 — 15 flagged, 3 real, **20%**. Flag *count* was identical; run-to-run overlap
+**67%** (12 of 18 union). Cost $0.037/fn, *cheaper* than June's $0.047 despite more output tokens.
+**Three findings that matter more than the number:**
+(1) **June's "real bugs vanish between runs" did NOT reproduce.** Both runs found the same two core
+real bugs (`to_text`, `get_all_subclasses`). Sonnet 5 is materially more reproducible here; the
+variance is in the tail, not the core — a partial reversal of D60's pessimism.
+(2) **A new, fourth real bug, found only on Sonnet 5:** `boltons.iterutils.backoff_iter(start, stop,
+factor=1.0)` raises an unhandled `ZeroDivisionError`. The library's own guard is
+`if factor < 1.0: raise ValueError`, so `factor == 1.0` is **explicitly declared in-domain**, and then
+`math.log(stop/denom, factor)` divides by `log(1.0) == 0`. Supplying `count` avoids it. This is the
+cleanest of the four bugs found to date — there is no judgement call about what counts as valid input,
+because the library's own validation admits it. TypeWright's inferred property quoted those guards
+verbatim ("does not raise for valid domain (… factor>=1 …)"), which is textbook-correct inference.
+(3) **The D60 verification stage is net-negative on this benchmark, deterministically.** In *both*
+runs it demoted `to_text` — a real bug carrying the exactly-correct property — and confirmed
+`copy_function`, which is a harness artifact (it works perfectly in a normal environment; its 6 bogus
+bugs are 18% of all flagged bugs). June's "no clear win" is now the stronger "it costs a real bug and
+keeps an artifact, every time." Left enabled for now (it does suppress the over-inference class) but
+its removal is the leading candidate for the next precision pass.
+**Methodology note (2nd self-inflicted corruption):** the first attempt at run 2 was ruined by
+TypeWright's *own* D62 daily cap — run 1 left the counter at $1.88 against a $3.00 ceiling, so 20 of 49
+functions returned 503, including all three ground-truth functions, which read as dramatic instability
+until the status codes were checked. Same class as D53's rate limiter throttling the operator's own
+batch in June. Operator batches must explicitly lift both caps, and the sweep harness should abort on
+a non-200 rather than record it as a result. **Status: measured + published 2026-08-16; artifacts in
+`TypeWright_BugHunt/sonnet5_2026-08-16/`.**
