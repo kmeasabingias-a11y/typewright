@@ -114,20 +114,32 @@ class CostBudgetExceededError(Exception):
 
 
 class MonthlyBudgetExceededError(Exception):
-    """The service hit its global monthly LLM-cost ceiling — mapped to 503 (Phase 10, D58).
+    """The service hit a global LLM-cost ceiling for a calendar period — 503 (Phase 10, D58/D62).
 
     Distinct from ``CostBudgetExceededError`` (one analysis's own budget -> 402, the caller's
-    concern): this is the operator's *aggregate* monthly spend across every analysis and entry
-    point being used up, so the honest answer is "temporarily unavailable, try again later" — a
-    503. Carries ``retry_after`` (seconds to month rollover) for the Retry-After header.
+    concern): this is the operator's *aggregate* spend across every analysis and entry point being
+    used up, so the honest answer is "temporarily unavailable, try again later" — a 503. Carries
+    ``retry_after`` (seconds to the period's rollover) for the Retry-After header.
+
+    ``period`` names which ceiling was hit — "Monthly" (D58, the hard bill) or "Daily" (D62, the
+    sub-cap that stops one bad day from consuming the whole month). Both map to the same 503; the
+    period only changes the message, the body's ``period`` field, and how long the wait is.
     """
 
-    def __init__(self, spent_usd: float, limit_usd: float, retry_after: int | None = None) -> None:
+    def __init__(
+        self,
+        spent_usd: float,
+        limit_usd: float,
+        retry_after: int | None = None,
+        *,
+        period: str = "Monthly",
+    ) -> None:
         self.spent_usd = spent_usd
         self.limit_usd = limit_usd
         self.retry_after = retry_after
+        self.period = period
         super().__init__(
-            f"Monthly LLM-cost budget of ${limit_usd:.2f} exhausted (spent ${spent_usd:.4f})."
+            f"{period} LLM-cost budget of ${limit_usd:.2f} exhausted (spent ${spent_usd:.4f})."
         )
 
 

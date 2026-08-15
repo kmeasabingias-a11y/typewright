@@ -3,6 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from typewright.config import get_settings
 from typewright.kestrel import SandboxResult
 from typewright.main import (
     create_app,
@@ -135,9 +136,12 @@ def make_client():
         verify=_default_verify,
         store=None,
         rate_limiter=None,
+        settings=None,
     ) -> TestClient:
         run_store = store if store is not None else InMemoryRunStore()
         app = create_app()
+        if settings is not None:
+            app.dependency_overrides[get_settings] = lambda: settings
         app.dependency_overrides[get_infer_properties] = lambda: infer
         app.dependency_overrides[get_generate_strategies] = lambda: gen
         app.dependency_overrides[get_generate_test_file] = lambda: gen_tests

@@ -86,8 +86,9 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 20
 <body>
 <header>
     <h1>TypeWright</h1>
-    <p>Paste a Python function. TypeWright infers the properties it should satisfy, generates
-        Hypothesis tests, runs them in a sandbox, and shows the bugs — with a verified fix.</p>
+    <p>An AI property-based test generator for Python. Paste a function: TypeWright infers the
+        properties it should satisfy, writes Hypothesis tests, runs them in a sandbox, and — when
+        a test fails — proposes a fix and <b>proves it</b> by re-running the same tests.</p>
 </header>
 <main>
     <div class="panel">
@@ -117,11 +118,33 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 20
     <div id="share"></div>
     <div id="results"></div>
 </main>
-<footer>TypeWright finds silent wrong-answer bugs by checking implementation-independent
-    properties — not by re-running your own code as its own oracle.</footer>
+<footer>
+    <p>TypeWright looks for silent wrong-answer bugs by checking implementation-independent
+        properties — not by re-running your own code as its own oracle.</p>
+    <details>
+    <summary>How reliable is this?</summary>
+    <p>It is an <b>exploratory candidate generator, not an authoritative bug finder</b>. The two
+        halves of a result have very different standing:</p>
+    <ul>
+        <li><b>A verified fix is grounded.</b> The corrected function is spliced into the same
+        test file and actually re-run in the sandbox; "verified" means those tests passed.</li>
+        <li><b>A finding is a hypothesis.</b> It says an AI-inferred property was violated — the
+        property itself may be one your function never promised.</li>
+    </ul>
+    <p>Measured on a hand-labelled sweep of 49 functions from real pure-Python libraries: 15
+        findings flagged, <b>3 confirmed as genuine bugs</b> after manual review (~20% precision).
+        The failure modes are over-inferred properties (e.g. assuming case-folding round-trips,
+        which Unicode breaks) and inputs outside a function's real domain. Results also vary
+        between runs on the same input. Treat every finding as a lead to check, not a verdict.</p>
+    </details>
+</footer>
 
 <script>
 const $ = (id) => document.getElementById(id);
+
+// Optional demo access code (D62): when the deployment sets one, the shared link carries it as
+// ?code=... and the page forwards it on every analyze call. Absent on an open deployment.
+const ACCESS_CODE = new URLSearchParams(location.search).get('code');
 
 const Q3 = '"' + '"' + '"';
 const EXAMPLE = [
@@ -147,8 +170,13 @@ const d = data && data.detail;
 const detail = typeof d === 'string' ? d : JSON.stringify(d == null ? data : d);
 let msg;
 if (status === 400) msg = 'Could not analyze this function: ' + detail;
+else if (status === 403) msg = 'This demo needs an access code — open it via the shared link that includes ?code=…';
 else if (status === 422) msg = 'Invalid request: ' + detail;
 else if (status === 429) msg = 'Rate limited — please try again in a moment.';
+else if (status === 503 && data && data.period)
+    msg = 'The demo has reached its ' + data.period + ' analysis budget, so new runs are paused' +
+    (data.period === 'daily' ? ' until tomorrow (UTC).' : ' until next month.') +
+    ' Shared result links still work.';
 else if (status === 500) msg = 'Pipeline error' + (data && data.stage ? ' at stage "' + data.stage + '"' : '') +
 ': ' + detail;
 else if (status === 504) msg = 'The test run exceeded its time budget: ' + detail;
@@ -168,6 +196,23 @@ out.push(
     : '✅ No property violations found in <code>' + esc(fn) + '</code>') +
     '</div>'
 );
+
+const missing = data.unavailable_imports || [];
+if (missing.length) {
+    out.push(
+    '<div class="disclaimer">📦 Sandbox skipped: this function imports ' +
+    missing.map(esc).join(', ') +
+    ', which is not available in the test runtime. The tests below were generated but not run, ' +
+    'so an empty result here means "not checked", not "no bugs".</div>'
+    );
+}
+
+// The verified fix is the grounded half of a result — it was actually re-run and passed — so it
+// leads, above the inferred-property findings that are only candidates (Phase 10 framing pass).
+const fix = data.fix_suggestion;
+if (fix && fix.verified) {
+    out.push(fixBlock(fix));
+}
 
 if (bugs.length) {
     out.push('<div class="disclaimer">⚠️ Findings are violations of AI-inferred properties — confirm each is one your function is meant to guarantee.</div>');
@@ -201,22 +246,23 @@ for (const b of bugs) {
     );
 }
 
-const fix = data.fix_suggestion;
-if (fix) {
-    const badge = fix.verified
-    ? '<span class="verified">✓ verified — passes the same tests</span>'
-    : '<span class="unverified">unverified — no confident fix</span>';
-    out.push(
-    '<details class="fix"' + (fix.verified ? ' open' : '') + '>' +
-        '<summary>Suggested fix ' + badge + '</summary>' +
-        '<p>' + esc(fix.explanation) + '</p>' +
-        '<pre><code>' + esc(fix.code) + '</code></pre>' +
-        '<p class="disclaimer">⚠️ ' + esc(fix.disclaimer) + '</p>' +
-    '</details>'
-    );
+if (fix && !fix.verified) {
+    out.push(fixBlock(fix));
 }
 
 $('results').innerHTML = out.join('');
+}
+
+function fixBlock(fix) {
+const badge = fix.verified
+    ? '<span class="verified">✓ verified — re-ran the same tests and passed</span>'
+    : '<span class="unverified">unverified — no confident fix</span>';
+return '<details class="fix"' + (fix.verified ? ' open' : '') + '>' +
+    '<summary>Suggested fix ' + badge + '</summary>' +
+    '<p>' + esc(fix.explanation) + '</p>' +
+    '<pre><code>' + esc(fix.code) + '</code></pre>' +
+    '<p class="disclaimer">⚠️ ' + esc(fix.disclaimer) + '</p>' +
+    '</details>';
 }
 
 async function run() {
@@ -224,9 +270,11 @@ setBusy(true);
 $('error').textContent = '';
 $('results').innerHTML = '';
 try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (ACCESS_CODE) { headers['X-Demo-Access-Code'] = ACCESS_CODE; }
     const res = await fetch('/v1/analyze', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: headers,
     body: JSON.stringify({
         code: $('code').value,
         function_name: $('fname').value.trim() || null,
@@ -247,7 +295,10 @@ try {
 }
 
 function shareUrl(id) {
-return location.origin + location.pathname + '?run=' + encodeURIComponent(id);
+let url = location.origin + location.pathname + '?run=' + encodeURIComponent(id);
+// Keep the access code on the link so the recipient can run their own analysis too (D62).
+if (ACCESS_CODE) { url += '&code=' + encodeURIComponent(ACCESS_CODE); }
+return url;
 }
 
 function showShareBar(id) {

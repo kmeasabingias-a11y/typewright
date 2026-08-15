@@ -102,7 +102,8 @@ def test_generate_test_file_assembles_runnable_file(monkeypatch):
     assert result.test_names == ["test_metamorphic"]  # read off the AST, not the LLM
     assert fake.kwargs["model"] == settings.model_standard  # default tier
     assert fake.kwargs["response_model"] is GeneratedTests
-    assert fake.kwargs["temperature"] == settings.llm_temperature
+    # temperature is OMITTED unless explicitly configured — current Claude models reject it (D65)
+    assert "temperature" not in fake.kwargs
     assert fake.kwargs["max_tokens"] == settings.llm_max_tokens_codegen
 
 

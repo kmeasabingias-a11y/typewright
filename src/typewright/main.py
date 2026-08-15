@@ -141,6 +141,22 @@ def _enforce_rate_limit(limiter: RateLimiter, key: str, limit: int) -> None:
         raise RateLimitedError(result.retry_after)
 
 
+def _enforce_access_code(request: Request, settings: Settings) -> None:
+    """Reject an analyze request that lacks the demo access code, when one is set (D62).
+
+    No-op unless ``demo_access_code`` is configured, so local and test behaviour is unchanged.
+    The code may arrive as the ``X-Demo-Access-Code`` header (what the demo page sends) or as a
+    ``?code=`` query parameter (so a bare curl works too). Checked AFTER the rate limit, so
+    guessing at the code is throttled like any other traffic.
+    """
+    expected = settings.demo_access_code
+    if not expected:
+        return
+    supplied = request.headers.get("X-Demo-Access-Code") or request.query_params.get("code")
+    if supplied != expected:
+        raise HTTPException(status_code=403, detail="Missing or invalid demo access code.")
+
+
 @lru_cache
 def _default_run_store() -> SqliteRunStore:
     """Build the process-wide SQLite run store from settings (created once)."""
@@ -287,13 +303,14 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(MonthlyBudgetExceededError)
     async def handle_monthly_budget(request: Request, exc: MonthlyBudgetExceededError) -> JSONResponse:
-        """Map an exhausted global monthly cost budget to 503 + Retry-After (Phase 10, D58).
+        """Map an exhausted global cost budget (monthly D58, or daily D62) to 503 + Retry-After.
 
-        Distinct from the per-analysis 402 (D52): the *service's* monthly spend is used up, so the
+        Distinct from the per-analysis 402 (D52): the *service's* own spend is used up, so the
         honest answer is "temporarily unavailable, try again later," not "your request was too
-        expensive." Reads (GET /, /v1/runs/{id}, /health) are unaffected — they make no LLM call.
+        expensive." Reads (GET /, /v1/runs/{id}, /health) are unaffected — they make no LLM call,
+        so shared ``?run=`` links keep resolving while new analyses are paused.
         """
-        logger.warning("monthly cost budget exhausted: %s", exc)
+        logger.warning("cost budget exhausted: %s", exc)
         headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after is not None else None
         return JSONResponse(
             status_code=503,
@@ -301,6 +318,7 @@ def create_app() -> FastAPI:
                 "detail": str(exc),
                 "spent_usd": round(exc.spent_usd, 6),
                 "limit_usd": exc.limit_usd,
+                "period": exc.period.lower(),
             },
             headers=headers,
         )
@@ -407,6 +425,7 @@ def create_app() -> FastAPI:
                 f"analyze:{_client_ip(http_request, settings)}",
                 settings.rate_limit_analyze_per_minute,
             )
+        _enforce_access_code(http_request, settings)
 
         analysis_id = str(uuid.uuid4())
         cost_budget = (

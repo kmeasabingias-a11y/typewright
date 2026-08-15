@@ -83,7 +83,8 @@ def test_generate_strategies_returns_plan(monkeypatch):
     assert fake.kwargs["model"] == settings.model_standard  # default tier
     assert fake.kwargs["api_key"] == "test-key"
     assert fake.kwargs["response_model"] is StrategyPlan
-    assert fake.kwargs["temperature"] == settings.llm_temperature
+    # temperature is OMITTED unless explicitly configured — current Claude models reject it (D65)
+    assert "temperature" not in fake.kwargs
 
 
 def test_generate_strategies_uses_requested_tier(monkeypatch):

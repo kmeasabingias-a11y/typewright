@@ -704,3 +704,53 @@ def test_monthly_budget_exhausted_returns_503(make_client):
     assert resp.status_code == 503
     assert resp.headers["retry-after"] == "3600"
     assert resp.json()["limit_usd"] == 10.0
+
+def test_daily_budget_exhausted_returns_503_labelled_daily(make_client):
+    """The daily cap (D62) reuses the monthly 503 path but says which ceiling was hit."""
+    from typewright.errors import MonthlyBudgetExceededError
+
+    def exhausted(meta, *, model_tier=None):
+        raise MonthlyBudgetExceededError(
+            spent_usd=2.1, limit_usd=2.0, retry_after=1800, period="Daily"
+        )
+
+    client = make_client(infer=exhausted)
+    resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
+    assert resp.status_code == 503
+    assert resp.headers["retry-after"] == "1800"
+    body = resp.json()
+    assert body["period"] == "daily"
+    assert "Daily LLM-cost budget" in body["detail"]
+
+
+def _gated_settings():
+    """Settings with the demo access gate switched on (D62)."""
+    from typewright.config import Settings
+
+    return Settings(demo_access_code="s3cret")
+
+
+def test_analyze_without_the_access_code_is_403_when_gate_is_on(make_client):
+    client = make_client(settings=_gated_settings())
+    resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
+    assert resp.status_code == 403
+
+
+def test_analyze_accepts_the_access_code_by_header_or_query(make_client):
+    client = make_client(settings=_gated_settings())
+    body = {"code": "def f():\n    pass"}
+
+    by_header = client.post("/v1/analyze", json=body, headers={"X-Demo-Access-Code": "s3cret"})
+    assert by_header.status_code == 200
+
+    by_query = client.post("/v1/analyze?code=s3cret", json=body)
+    assert by_query.status_code == 200
+
+    wrong = client.post("/v1/analyze", json=body, headers={"X-Demo-Access-Code": "nope"})
+    assert wrong.status_code == 403
+
+
+def test_analyze_is_open_when_no_access_code_is_configured(client):
+    """Default posture is unchanged: no code set -> no gate (local dev, existing deployments)."""
+    resp = client.post("/v1/analyze", json={"code": "def f():\n    pass"})
+    assert resp.status_code == 200

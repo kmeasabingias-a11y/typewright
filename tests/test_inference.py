@@ -80,7 +80,8 @@ def test_infer_properties_returns_analysis(monkeypatch):
     assert fake.kwargs["model"] == settings.model_standard  # default tier
     assert fake.kwargs["api_key"] == "test-key"
     assert fake.kwargs["response_model"] is PropertyDetection
-    assert fake.kwargs["temperature"] == settings.llm_temperature
+    # temperature is OMITTED unless explicitly configured — current Claude models reject it (D65)
+    assert "temperature" not in fake.kwargs
 
 
 def test_infer_properties_uses_requested_tier(monkeypatch):

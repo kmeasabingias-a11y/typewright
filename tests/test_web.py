@@ -32,3 +32,10 @@ def test_index_supports_shared_links():
 def test_index_shows_inferred_property_disclaimer():
     body = TestClient(create_app()).get("/").text
     assert "AI-inferred properties" in body
+
+def test_index_surfaces_unavailable_imports_and_the_access_gate(client):
+    """Phase-10 framing pass + D62: the page renders honest degradation and forwards the code."""
+    body = client.get("/").text
+    assert "unavailable_imports" in body       # sandbox-skipped runs are shown, not silently empty
+    assert "X-Demo-Access-Code" in body        # forwards ?code= to the gated analyze endpoint
+    assert "How reliable is this?" in body     # the precision/limits note

@@ -87,12 +87,53 @@ def test_monthly_meter_add_ignores_nonpositive(tmp_path):
     assert m.current_total() == 0.0
 
 
-def test_monthly_meter_disabled_when_nonpositive():
-    from types import SimpleNamespace
-    from typewright.llm import _monthly_meter
-    from typewright.metrics import MonthlyCostMeter
+def test_daily_meter_is_a_separate_counter_from_the_monthly_one(tmp_path):
+    """The daily cap (D62) keeps its own row/table, so the two ceilings are independent."""
+    from typewright.metrics import DailyCostMeter, MonthlyCostMeter
 
-    disabled = SimpleNamespace(max_monthly_cost_usd=0, runs_db_path="unused.db")
-    enabled = SimpleNamespace(max_monthly_cost_usd=5.0, runs_db_path="unused.db")
-    assert _monthly_meter(disabled) is None
-    assert isinstance(_monthly_meter(enabled), MonthlyCostMeter)
+    db = str(tmp_path / "runs.db")
+    daily = DailyCostMeter(db, limit_usd=1.00)
+    monthly = MonthlyCostMeter(db, limit_usd=10.00)
+    daily.add(0.40)
+    assert round(daily.current_total(), 4) == 0.40
+    assert monthly.current_total() == 0.0  # billing one does not bill the other
+    monthly.add(0.25)
+    assert round(daily.current_total(), 4) == 0.40
+    assert round(DailyCostMeter(db, limit_usd=1.00).current_total(), 4) == 0.40  # durable
+
+
+def test_daily_meter_check_raises_with_a_daily_period_and_same_day_retry(tmp_path):
+    """Exhausting the daily cap is the same 503 as monthly, labelled daily, clearing at midnight."""
+    from typewright.errors import MonthlyBudgetExceededError
+    from typewright.metrics import DailyCostMeter
+
+    m = DailyCostMeter(str(tmp_path / "runs.db"), limit_usd=0.10)
+    m.add(0.05)
+    m.check()  # under the cap -> fine
+    m.add(0.06)  # total 0.11 >= 0.10
+    with pytest.raises(MonthlyBudgetExceededError) as excinfo:
+        m.check()
+    assert excinfo.value.period == "Daily"
+    assert "Daily LLM-cost budget" in str(excinfo.value)
+    # rollover is the next UTC midnight -> never more than a day away
+    assert 0 < excinfo.value.retry_after <= 86_400
+
+
+def test_budget_meters_include_only_the_caps_that_are_enabled():
+    """A cap <= 0 is off; each positive cap contributes its own meter (D58 monthly, D62 daily)."""
+    from types import SimpleNamespace
+    from typewright.llm import _budget_meters
+    from typewright.metrics import DailyCostMeter, MonthlyCostMeter
+
+    def settings(monthly, daily):
+        return SimpleNamespace(
+            max_monthly_cost_usd=monthly, max_daily_cost_usd=daily, runs_db_path="unused.db"
+        )
+
+    assert _budget_meters(settings(0, 0)) == []
+    assert [type(m) for m in _budget_meters(settings(5.0, 0))] == [MonthlyCostMeter]
+    assert [type(m) for m in _budget_meters(settings(0, 1.0))] == [DailyCostMeter]
+    assert [type(m) for m in _budget_meters(settings(5.0, 1.0))] == [
+        MonthlyCostMeter,
+        DailyCostMeter,
+    ]

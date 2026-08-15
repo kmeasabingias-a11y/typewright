@@ -40,8 +40,8 @@ class Settings(BaseSettings):
     # model_tier -> LiteLLM model string. The ``anthropic/`` prefix tells
     # LiteLLM which provider to route to (D17). IDs from the current catalog.
     model_economy: str = "anthropic/claude-haiku-4-5"
-    model_standard: str = "anthropic/claude-sonnet-4-6"
-    model_premium: str = "anthropic/claude-opus-4-8"
+    model_standard: str = "anthropic/claude-sonnet-5"
+    model_premium: str = "anthropic/claude-opus-5"
     default_model_tier: str = "standard"
 
     llm_timeout_seconds: float = 30.0
@@ -49,7 +49,13 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 2048
     llm_max_tokens_codegen: int = 4096
         # detected-property lists are small
-    llm_temperature: float = 0.0  # deterministic detection; low temp curbs fabrication
+    # Sampling temperature, or None to OMIT the parameter entirely (the default, D65).
+    # The current Claude generation (Sonnet 5 / Opus 5 and the 4.7+ family) REMOVED sampling
+    # parameters: sending `temperature` at all returns 400 "`temperature` is deprecated for this
+    # model", which took down the whole detection stage in the pre-launch smoke. Determinism now
+    # comes from the structured-output schema + prompt, not from sampling. Set a float only when
+    # pinning an older model that still accepts it (e.g. the Haiku economy tier).
+    llm_temperature: float | None = None
 
 
 # --- Kestrel sandbox (Phase 5) ---
@@ -93,6 +99,18 @@ class Settings(BaseSettings):
     # over. Set to 0 (or negative) to disable the monthly cap. Both the web and worker processes
     # must share the same runs_db_path for one global counter.
     max_monthly_cost_usd: float = 10.00
+    # --- Cost controls (Phase 10, D62): global DAILY cap ---
+    # Same mechanism and same 503 as the monthly cap, over a UTC calendar day. The monthly cap
+    # bounds the bill; this bounds the blast radius of one bad day, so a single abusive caller
+    # can't burn the whole month in an afternoon and leave a public demo dead for weeks — spend
+    # resumes at the next UTC midnight. Set to 0 (or negative) to disable.
+    max_daily_cost_usd: float = 2.00
+    # --- Demo access gate (Phase 10, D62) ---
+    # When set, POST /v1/analyze requires this code (X-Demo-Access-Code header, or ?code= on the
+    # demo page, which forwards it). Empty/unset (the default) leaves the endpoint open. This is
+    # the kill-switch for a public URL: share links as https://host/?code=<value> and a scraper or
+    # abuser without the code gets 403 while a recruiter with the link notices nothing.
+    demo_access_code: str | None = None
     # --- Bug verification (Phase 10, D60): second-opinion precision filter ---
     # When True (default), each reported bug gets a skeptical second-opinion LLM verdict — is the
     # violated property contractual, and is the failing input in-domain? — to suppress the
