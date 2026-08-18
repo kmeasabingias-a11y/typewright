@@ -14,7 +14,7 @@ unflattering.
 | Runs | 2 (Sonnet 5, 2026-08-16) + 1 baseline (Sonnet 4.6, 2026-06-30) |
 | Precision | **13%** and **20%** — ~17% average |
 | Run-to-run overlap | **67%** (12 of 18 union candidates agreed) |
-| Real bugs found | **4**, all still unfixed in `boltons` 26.1.0 |
+| Real bugs found | **4**, all present in `boltons` 26.1.0 (the current release); 3 still unfixed upstream |
 | Cost | ~$0.037 per function |
 
 Targets were `boltons`, `inflection`, and `stringcase` — real, widely-installed,
@@ -46,7 +46,7 @@ All four reproduce on `boltons` **26.1.0**, re-verified 2026-08-18 on CPython 3.
 
 | function | defect |
 |---|---|
-| `iterutils.backoff_iter` | `ZeroDivisionError` at `factor=1.0` — which the function's own validation explicitly admits |
+| `iterutils.backoff_iter` | `ZeroDivisionError` at `factor=1.0` — which the function's own validation explicitly admits. **Independently found and fixed upstream** ([PR #428](https://github.com/mahmoud/boltons/pull/428), merged 2026-07-18, six hours after 26.1.0 shipped) — see the note in §4 |
 | `tableutils.to_text` | returns a string longer than the `maxlen` it was given, for `maxlen ≤ 3` |
 | `typeutils.get_all_subclasses` | `TypeError` on any class whose subtree contains a metaclass |
 | `timeutils.daterange` | month-overflow `ValueError` on a documented-valid step |

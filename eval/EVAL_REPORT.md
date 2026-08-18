@@ -127,7 +127,9 @@ on a known-good target**, and it belongs in the precision picture as much as the
 ## 4. The four verified bugs
 
 All four re-verified by hand against **boltons 26.1.0** (current release, re-run 2026-08-18 on
-CPython 3.12). All four still reproduce; none are fixed.
+CPython 3.12). All four reproduce there. Three remain unfixed upstream; `backoff_iter` was
+independently fixed on `master` after 26.1.0 shipped — see the note below, which is
+corroboration rather than a correction.
 
 ### 1. `iterutils.backoff_iter(start, stop, factor=1.0)` — `ZeroDivisionError` *(new, Sonnet 5)*
 
@@ -142,6 +144,19 @@ The function's **own validation rejects anything below 1.0** — `backoff_iter(1
 raises `ValueError: expected factor >= 1.0, not 0.5` — so `factor == 1.0` is explicitly declared
 in-domain by the library itself. It then computes
 `count = 1 + math.ceil(math.log(stop/denom, factor))`, and `math.log(1.0)` is `0`.
+
+> **Independently confirmed.** This bug was found and fixed by another contributor in
+> [PR #428](https://github.com/mahmoud/boltons/pull/428) — opened 2026-07-17, merged
+> 2026-07-18, six hours after 26.1.0 was released. The accepted fix raises a descriptive
+> `ValueError` when `count is None` and `factor == 1.0`, matching option 2 of the three
+> remedies this analysis proposed. It is therefore present in the current *release* and
+> absent from current `master`.
+>
+> That a human found the same defect independently, and that the maintainer merged a fix
+> for it, is **third-party evidence that this finding was a genuine bug rather than a false
+> positive** — which is the claim a precision evaluation most needs corroborated. It is
+> recorded here for that reason, and because a report that quietly dropped it would be less
+> honest than one that says a competitor got there first.
 
 This is the cleanest of the four — there is no judgement call about whether the input is
 "documented valid," because the library's own guard admits it. Same class as
@@ -342,5 +357,6 @@ The harness is in [`harness/`](harness/): `sweep.py` (self-containment transform
 re-run it — and read the operator-cap warning there first.
 
 **The honest summary: about one flagged candidate in six is a real bug, the tool found four real
-defects in a widely-used library that are still unfixed, and the most useful thing it produced was
-a clean negative result about its own verification stage.**
+defects in a widely-used library — three of them still unfixed, and the fourth independently
+confirmed by a human who found and fixed it a month earlier — and the most useful thing it produced
+was a clean negative result about its own verification stage.**
