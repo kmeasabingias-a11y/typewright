@@ -1,0 +1,1099 @@
+{
+  "results": [
+    {
+      "lib": "boltons.mathutils",
+      "func": "clamp",
+      "code": "def clamp(x, lower=float('-inf'), upper=float('inf')):\n    \"\"\"Limit a value to a given range.\n\n    Args:\n        x (int or float): Number to be clamped.\n        lower (int or float): Minimum value for x.\n        upper (int or float): Maximum value for x.\n\n    The returned value is guaranteed to be between *lower* and\n    *upper*. Integers, floats, and other comparable types can be\n    mixed.\n\n    >>> clamp(1.0, 0, 5)\n    1.0\n    >>> clamp(-1.0, 0, 5)\n    0\n    >>> clamp(101.0, 0, 5)\n    5\n    >>> clamp(123, upper=5)\n    5\n\n    Similar to `numpy's clip`_ function.\n\n    .. _numpy's clip: http://docs.scipy.org/doc/numpy/reference/generated/numpy.clip.html\n\n    \"\"\"\n    if upper < lower:\n        raise ValueError('expected upper bound (%r) >= lower bound (%r)' % (upper, lower))\n    return min(max(x, lower), upper)",
+      "imports": [],
+      "status": 200,
+      "payload": {
+        "analysis_id": "c0ce08e1-3058-421d-806a-fed2afa116ea",
+        "function": {
+          "name": "clamp",
+          "signature": "(x, lower=float('-inf'), upper=float('inf'))",
+          "args": [
+            {
+              "name": "x",
+              "type_hint": null,
+              "default": null,
+              "kind": "positional_or_keyword"
+            },
+            {
+              "name": "lower",
+              "type_hint": null,
+              "default": "float('-inf')",
+              "kind": "positional_or_keyword"
+            },
+            {
+              "name": "upper",
+              "type_hint": null,
+              "default": "float('inf')",
+              "kind": "positional_or_keyword"
+            }
+          ],
+          "return_type": null,
+          "docstring": "Limit a value to a given range.\n\nArgs:\n    x (int or float): Number to be clamped.\n    lower (int or float): Minimum value for x.\n    upper (int or float): Maximum value for x.\n\nThe returned value is guaranteed to be between *lower* and\n*upper*. Integers, floats, and other comparable types can be\nmixed.\n\n>>> clamp(1.0, 0, 5)\n1.0\n>>> clamp(-1.0, 0, 5)\n0\n>>> clamp(101.0, 0, 5)\n5\n>>> clamp(123, upper=5)\n5\n\nSimilar to `numpy's clip`_ function.\n\n.. _numpy's clip: http://docs.scipy.org/doc/numpy/reference/generated/numpy.clip.html"
+        },
+        "properties": {
+          "detected": [
+            {
+              "property_class": "idempotence",
+              "relation": "clamp(clamp(x, lower, upper), lower, upper) == clamp(x, lower, upper)",
+              "companion_function": null,
+              "rationale": "Clamping an already-clamped value to the same range leaves it unchanged \u2014 the result is already within [lower, upper], so a second clamp is a no-op.",
+              "confidence": 0.98
+            },
+            {
+              "property_class": "value_postcondition",
+              "relation": "lower <= clamp(x, lower, upper) <= upper",
+              "companion_function": null,
+              "rationale": "The docstring explicitly guarantees 'The returned value is guaranteed to be between lower and upper' \u2014 this is a direct, testable constraint on the output value derived from the function's stated intent.",
+              "confidence": 0.99
+            },
+            {
+              "property_class": "metamorphic",
+              "relation": "clamp(x, lower, upper) <= clamp(y, lower, upper) when x <= y (monotonicity)",
+              "companion_function": null,
+              "rationale": "Clamping is monotone: if x \u2264 y, the clamped result of x cannot exceed the clamped result of y for the same bounds.",
+              "confidence": 0.92
+            },
+            {
+              "property_class": "metamorphic",
+              "relation": "clamp(x, lower, upper) == clamp(x, lower, upper2) when upper2 >= upper and clamp(x, lower, upper) <= upper (widening the upper bound does not change the result when x is already within range)",
+              "companion_function": null,
+              "rationale": "Widening the clamp range should not change the output when the value is already within the original range \u2014 a monotonicity/range-widening metamorphic relation.",
+              "confidence": 0.8
+            },
+            {
+              "property_class": "totality",
+              "relation": "clamp(x, lower, upper) does not raise for any x, lower, upper where lower <= upper",
+              "companion_function": null,
+              "rationale": "The function raises only when upper < lower (explicitly documented); for all valid inputs in its declared domain it should complete without error.",
+              "confidence": 0.85
+            }
+          ],
+          "input_types": {
+            "x": null,
+            "lower": null,
+            "upper": null
+          },
+          "return_type": null
+        },
+        "strategy_plan": {
+          "strategies": [
+            {
+              "argument": "x",
+              "strategy": "st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True))",
+              "rationale": "Docstring says x is int or float; both are valid. Infinities are allowed since lower/upper default to \u00b1inf.",
+              "confidence": 0.92
+            },
+            {
+              "argument": "lower",
+              "strategy": "st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True))",
+              "rationale": "Docstring says lower is int or float with default -inf, so any real number or -inf is valid. Must satisfy lower <= upper, handled by test setup.",
+              "confidence": 0.88
+            },
+            {
+              "argument": "upper",
+              "strategy": "st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True))",
+              "rationale": "Docstring says upper is int or float with default +inf, so any real number or +inf is valid. Must satisfy lower <= upper, handled by test setup.",
+              "confidence": 0.88
+            }
+          ],
+          "extra_imports": []
+        },
+        "test_file": {
+          "source": "from hypothesis import given, strategies as st\nimport pytest\nfrom hypothesis import assume\n\n\ndef clamp(x, lower=float('-inf'), upper=float('inf')):\n    \"\"\"Limit a value to a given range.\n\n    Args:\n        x (int or float): Number to be clamped.\n        lower (int or float): Minimum value for x.\n        upper (int or float): Maximum value for x.\n\n    The returned value is guaranteed to be between *lower* and\n    *upper*. Integers, floats, and other comparable types can be\n    mixed.\n\n    >>> clamp(1.0, 0, 5)\n    1.0\n    >>> clamp(-1.0, 0, 5)\n    0\n    >>> clamp(101.0, 0, 5)\n    5\n    >>> clamp(123, upper=5)\n    5\n\n    Similar to `numpy's clip`_ function.\n\n    .. _numpy's clip: http://docs.scipy.org/doc/numpy/reference/generated/numpy.clip.html\n\n    \"\"\"\n    if upper < lower:\n        raise ValueError('expected upper bound (%r) >= lower bound (%r)' % (upper, lower))\n    return min(max(x, lower), upper)\n\n\n@given(\n    x=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n    lower=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n    upper=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n)\ndef test_idempotence(x, lower, upper):\n    assume(lower <= upper)\n    result = clamp(x, lower, upper)\n    assert clamp(result, lower, upper) == result\n\n\n@given(\n    x=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n    lower=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n    upper=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n)\ndef test_value_postcondition(x, lower, upper):\n    assume(lower <= upper)\n    result = clamp(x, lower, upper)\n    assert lower <= result <= upper\n\n\n@given(\n    x=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n    y=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n    lower=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n    upper=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n)\ndef test_metamorphic_monotonicity(x, y, lower, upper):\n    assume(lower <= upper)\n    assume(x <= y)\n    assert clamp(x, lower, upper) <= clamp(y, lower, upper)\n\n\n@given(\n    x=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n    lower=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n    upper=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n    upper2=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n)\ndef test_metamorphic_widening_upper(x, lower, upper, upper2):\n    assume(lower <= upper)\n    assume(upper2 >= upper)\n    result = clamp(x, lower, upper)\n    assume(result <= upper)  # always true by postcondition, but explicit for clarity\n    assert clamp(x, lower, upper2) == result\n\n\n@given(\n    x=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n    lower=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n    upper=st.one_of(st.integers(), st.floats(allow_nan=False, allow_infinity=True)),\n)\ndef test_totality(x, lower, upper):\n    assume(lower <= upper)\n    clamp(x, lower, upper)  # should not raise\n",
+          "test_names": [
+            "test_idempotence",
+            "test_value_postcondition",
+            "test_metamorphic_monotonicity",
+            "test_metamorphic_widening_upper",
+            "test_totality"
+          ],
+          "skipped": []
+        },
+        "bugs_found": [
+          {
+            "test_name": "test_metamorphic_widening_upper",
+            "failing_input": "x=0, lower=-1, upper=-1.0, upper2=0",
+            "error": "AssertionError",
+            "violated_property": "metamorphic_widening_upper",
+            "severity": "property_violation"
+          }
+        ],
+        "fix_suggestion": null,
+        "metadata": {
+          "analysis_duration_ms": 26712,
+          "llm_cost_usd": 0.048792,
+          "tests_generated": 5,
+          "tests_run": 5,
+          "hypothesis_examples_tried": null
+        }
+      },
+      "secs": 30.3
+    },
+    {
+      "lib": "inflection",
+      "func": "humanize",
+      "code": "def humanize(word: str) -> str:\n    \"\"\"\n    Capitalize the first word and turn underscores into spaces and strip a\n    trailing ``\"_id\"``, if any. Like :func:`titleize`, this is meant for\n    creating pretty output.\n\n    Examples::\n\n        >>> humanize(\"employee_salary\")\n        'Employee salary'\n        >>> humanize(\"author_id\")\n        'Author'\n\n    \"\"\"\n    import re\n    word = re.sub('_id$', '', word)\n    word = word.replace('_', ' ')\n    word = re.sub('(?i)([a-z\\\\d]*)', lambda m: m.group(1).lower(), word)\n    word = re.sub('^\\\\w', lambda m: m.group(0).upper(), word)\n    return word",
+      "imports": [
+        "re"
+      ],
+      "status": 200,
+      "payload": {
+        "analysis_id": "5f27f998-c4ee-429b-99e9-eb30df18e941",
+        "function": {
+          "name": "humanize",
+          "signature": "(word: str) -> str",
+          "args": [
+            {
+              "name": "word",
+              "type_hint": "str",
+              "default": null,
+              "kind": "positional_or_keyword"
+            }
+          ],
+          "return_type": "str",
+          "docstring": "Capitalize the first word and turn underscores into spaces and strip a\ntrailing ``\"_id\"``, if any. Like :func:`titleize`, this is meant for\ncreating pretty output.\n\nExamples::\n\n    >>> humanize(\"employee_salary\")\n    'Employee salary'\n    >>> humanize(\"author_id\")\n    'Author'"
+        },
+        "properties": {
+          "detected": [
+            {
+              "property_class": "idempotence",
+              "relation": "humanize(humanize(word)) == humanize(word)",
+              "companion_function": null,
+              "rationale": "humanize is a normalizer (strips suffix, replaces underscores, lowercases then capitalizes first char). Applying it a second time to its already-normalized output should yield the same result, since there are no underscores, no trailing '_id', and the casing is already correct.",
+              "confidence": 0.82
+            },
+            {
+              "property_class": "metamorphic",
+              "relation": "humanize(word.upper()) == humanize(word) and humanize(word.lower()) == humanize(word)",
+              "companion_function": null,
+              "rationale": "The function lowercases all characters before capitalizing the first word, making it case-insensitive with respect to the input.",
+              "confidence": 0.85
+            },
+            {
+              "property_class": "value_postcondition",
+              "relation": "humanize(word)[0] == humanize(word)[0].upper() if humanize(word) else True",
+              "companion_function": null,
+              "rationale": "The docstring states the first word is capitalized, so the first character of a non-empty result must be uppercase \u2014 derivable purely from the function's stated intent.",
+              "confidence": 0.9
+            },
+            {
+              "property_class": "value_postcondition",
+              "relation": "'_' not in humanize(word)",
+              "companion_function": null,
+              "rationale": "The docstring explicitly states underscores are turned into spaces, so the output must contain no underscores.",
+              "confidence": 0.95
+            },
+            {
+              "property_class": "value_postcondition",
+              "relation": "not humanize(word).endswith('_id') and not humanize(word).endswith(' id')",
+              "companion_function": null,
+              "rationale": "The docstring states a trailing '_id' is stripped; after underscore-to-space replacement this means the output will not end with ' id' either.",
+              "confidence": 0.88
+            },
+            {
+              "property_class": "type_postcondition",
+              "relation": "isinstance(humanize(word), str)",
+              "companion_function": null,
+              "rationale": "The return type annotation is str; the output must always be a string.",
+              "confidence": 0.99
+            }
+          ],
+          "input_types": {
+            "word": "str"
+          },
+          "return_type": "str"
+        },
+        "strategy_plan": {
+          "strategies": [
+            {
+              "argument": "word",
+              "strategy": "st.text(alphabet=st.sampled_from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'), min_size=0, max_size=50)",
+              "rationale": "The function is designed for underscore-separated identifiers (like Python variable/column names), so alphanumeric characters plus underscores cover the intended domain. The metamorphic property confirms case-insensitivity, and the docstring examples show underscore-separated lowercase words. Keeping max_size reasonable avoids runaway inputs while still exercising edge cases like empty strings, '_id' suffixes, and multiple underscores.",
+              "confidence": 0.85
+            }
+          ],
+          "extra_imports": []
+        },
+        "test_file": {
+          "source": "from hypothesis import given, strategies as st\nimport pytest\n\n\ndef humanize(word: str) -> str:\n    \"\"\"\n    Capitalize the first word and turn underscores into spaces and strip a\n    trailing ``\"_id\"``, if any. Like :func:`titleize`, this is meant for\n    creating pretty output.\n\n    Examples::\n\n        >>> humanize(\"employee_salary\")\n        'Employee salary'\n        >>> humanize(\"author_id\")\n        'Author'\n\n    \"\"\"\n    import re\n    word = re.sub('_id$', '', word)\n    word = word.replace('_', ' ')\n    word = re.sub('(?i)([a-z\\\\d]*)', lambda m: m.group(1).lower(), word)\n    word = re.sub('^\\\\w', lambda m: m.group(0).upper(), word)\n    return word\n\n\n@given(word=st.text(alphabet=st.sampled_from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'), min_size=0, max_size=50))\ndef test_idempotence(word):\n    assert humanize(humanize(word)) == humanize(word)\n\n\n@given(word=st.text(alphabet=st.sampled_from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'), min_size=0, max_size=50))\ndef test_metamorphic(word):\n    assert humanize(word.upper()) == humanize(word)\n    assert humanize(word.lower()) == humanize(word)\n\n\n@given(word=st.text(alphabet=st.sampled_from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'), min_size=0, max_size=50))\ndef test_value_postcondition_first_char_upper(word):\n    result = humanize(word)\n    if result:\n        assert result[0] == result[0].upper()\n\n\n@given(word=st.text(alphabet=st.sampled_from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'), min_size=0, max_size=50))\ndef test_value_postcondition_no_underscores(word):\n    assert '_' not in humanize(word)\n\n\n@given(word=st.text(alphabet=st.sampled_from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'), min_size=0, max_size=50))\ndef test_value_postcondition_no_trailing_id(word):\n    result = humanize(word)\n    assert not result.endswith('_id')\n    assert not result.endswith(' id')\n\n\n@given(word=st.text(alphabet=st.sampled_from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_'), min_size=0, max_size=50))\ndef test_type_postcondition(word):\n    assert isinstance(humanize(word), str)\n",
+          "test_names": [
+            "test_idempotence",
+            "test_metamorphic",
+            "test_value_postcondition_first_char_upper",
+            "test_value_postcondition_no_underscores",
+            "test_value_postcondition_no_trailing_id",
+            "test_type_postcondition"
+          ],
+          "skipped": []
+        },
+        "bugs_found": [
+          {
+            "test_name": "test_metamorphic",
+            "failing_input": "| word='_id', |",
+            "error": "ExceptionGroup",
+            "violated_property": "humanize(word.upper()) == humanize(word) and humanize(word.lower()) == humanize(word)",
+            "severity": "crash"
+          }
+        ],
+        "fix_suggestion": null,
+        "metadata": {
+          "analysis_duration_ms": 23273,
+          "llm_cost_usd": 0.043638,
+          "tests_generated": 6,
+          "tests_run": 6,
+          "hypothesis_examples_tried": null
+        }
+      },
+      "secs": 26.9
+    },
+    {
+      "lib": "boltons.iterutils",
+      "func": "first",
+      "code": "def first(iterable, default=None, key=None):\n    \"\"\"Return first element of *iterable* that evaluates to ``True``, else\n    return ``None`` or optional *default*. Similar to :func:`one`.\n\n    >>> first([0, False, None, [], (), 42])\n    42\n    >>> first([0, False, None, [], ()]) is None\n    True\n    >>> first([0, False, None, [], ()], default='ohai')\n    'ohai'\n    >>> import re\n    >>> m = first(re.match(regex, 'abc') for regex in ['b.*', 'a(.*)'])\n    >>> m.group(1)\n    'bc'\n\n    The optional *key* argument specifies a one-argument predicate function\n    like that used for *filter()*.  The *key* argument, if supplied, should be\n    in keyword form. For example, finding the first even number in an iterable:\n\n    >>> first([1, 1, 3, 4, 5], key=lambda x: x % 2 == 0)\n    4\n\n    Contributed by Hynek Schlawack, author of `the original standalone module`_.\n\n    .. _the original standalone module: https://github.com/hynek/first\n    \"\"\"\n    return next(filter(key, iterable), default)",
+      "imports": [],
+      "status": 200,
+      "payload": {
+        "analysis_id": "fd98ed3c-4629-4597-a720-a7d51c73e11c",
+        "function": {
+          "name": "first",
+          "signature": "(iterable, default=None, key=None)",
+          "args": [
+            {
+              "name": "iterable",
+              "type_hint": null,
+              "default": null,
+              "kind": "positional_or_keyword"
+            },
+            {
+              "name": "default",
+              "type_hint": null,
+              "default": "None",
+              "kind": "positional_or_keyword"
+            },
+            {
+              "name": "key",
+              "type_hint": null,
+              "default": "None",
+              "kind": "positional_or_keyword"
+            }
+          ],
+          "return_type": null,
+          "docstring": "Return first element of *iterable* that evaluates to ``True``, else\nreturn ``None`` or optional *default*. Similar to :func:`one`.\n\n>>> first([0, False, None, [], (), 42])\n42\n>>> first([0, False, None, [], ()]) is None\nTrue\n>>> first([0, False, None, [], ()], default='ohai')\n'ohai'\n>>> import re\n>>> m = first(re.match(regex, 'abc') for regex in ['b.*', 'a(.*)'])\n>>> m.group(1)\n'bc'\n\nThe optional *key* argument specifies a one-argument predicate function\nlike that used for *filter()*.  The *key* argument, if supplied, should be\nin keyword form. For example, finding the first even number in an iterable:\n\n>>> first([1, 1, 3, 4, 5], key=lambda x: x % 2 == 0)\n4\n\nContributed by Hynek Schlawack, author of `the original standalone module`_.\n\n.. _the original standalone module: https://github.com/hynek/first"
+        },
+        "properties": {
+          "detected": [
+            {
+              "property_class": "value_postcondition",
+              "relation": "result = first(iterable, default=default, key=key); assert result is default or result in iterable",
+              "companion_function": null,
+              "rationale": "The returned value is always either the default or an element drawn from the iterable \u2014 it never fabricates a new value.",
+              "confidence": 0.82
+            },
+            {
+              "property_class": "value_postcondition",
+              "relation": "result = first(iterable, default=None); assert result is None or bool(result) is True",
+              "companion_function": null,
+              "rationale": "When no key is supplied, the returned element (if not the default) must evaluate to True, per the docstring's core contract.",
+              "confidence": 0.88
+            },
+            {
+              "property_class": "value_postcondition",
+              "relation": "result = first(iterable, default=None, key=key); assert result is None or key(result) is True (when key is provided)",
+              "companion_function": null,
+              "rationale": "When a key predicate is supplied, the returned element must satisfy that predicate, mirroring filter()'s contract.",
+              "confidence": 0.8
+            },
+            {
+              "property_class": "metamorphic",
+              "relation": "If first(iterable, default=None) returns a non-None value v, then first([v] + list(iterable), default=None) == v (prepending the matching element keeps the result the same or earlier).",
+              "companion_function": null,
+              "rationale": "Monotonicity: adding a truthy element at the front of the iterable can only return that element or keep the same result \u2014 the first-truthy semantics are order-sensitive but stable under prepending.",
+              "confidence": 0.65
+            },
+            {
+              "property_class": "totality",
+              "relation": "first(iterable, default=default, key=key) does not raise for any finite iterable, any default value, and any callable or None key.",
+              "companion_function": null,
+              "rationale": "The function is a thin wrapper around next(filter(...), default) and should not raise for valid inputs in its declared domain.",
+              "confidence": 0.7
+            }
+          ],
+          "input_types": {
+            "iterable": null,
+            "default": null,
+            "key": null
+          },
+          "return_type": null
+        },
+        "strategy_plan": {
+          "strategies": [
+            {
+              "argument": "iterable",
+              "strategy": "st.one_of(st.lists(st.one_of(st.integers(), st.booleans(), st.none(), st.text(), st.floats(allow_nan=False))), st.lists(st.integers()))",
+              "rationale": "The function accepts any finite iterable; a list of mixed types (ints, bools, None, text, floats) covers the docstring examples and exercises truthiness checks well.",
+              "confidence": 0.8
+            },
+            {
+              "argument": "default",
+              "strategy": "st.one_of(st.none(), st.integers(), st.text(), st.booleans(), st.floats(allow_nan=False))",
+              "rationale": "default can be any value (None or otherwise); mixing several types exercises the fallback path broadly.",
+              "confidence": 0.85
+            },
+            {
+              "argument": "key",
+              "strategy": "st.one_of(st.none(), st.just(bool), st.just(lambda x: x is not None), st.just(lambda x: isinstance(x, int) and x % 2 == 0))",
+              "rationale": "key must be None or a callable predicate; a small set of representative callables (bool, not-None check, even-number check) plus None covers the documented usage without over-constraining.",
+              "confidence": 0.75
+            }
+          ],
+          "extra_imports": []
+        },
+        "test_file": {
+          "source": "from hypothesis import given, strategies as st\nimport pytest\n\n\ndef first(iterable, default=None, key=None):\n    \"\"\"Return first element of *iterable* that evaluates to ``True``, else\n    return ``None`` or optional *default*. Similar to :func:`one`.\n\n    >>> first([0, False, None, [], (), 42])\n    42\n    >>> first([0, False, None, [], ()]) is None\n    True\n    >>> first([0, False, None, [], ()], default='ohai')\n    'ohai'\n    >>> import re\n    >>> m = first(re.match(regex, 'abc') for regex in ['b.*', 'a(.*)'])\n    >>> m.group(1)\n    'bc'\n\n    The optional *key* argument specifies a one-argument predicate function\n    like that used for *filter()*.  The *key* argument, if supplied, should be\n    in keyword form. For example, finding the first even number in an iterable:\n\n    >>> first([1, 1, 3, 4, 5], key=lambda x: x % 2 == 0)\n    4\n\n    Contributed by Hynek Schlawack, author of `the original standalone module`_.\n\n    .. _the original standalone module: https://github.com/hynek/first\n    \"\"\"\n    return next(filter(key, iterable), default)\n\n\n@given(\n    iterable=st.one_of(st.lists(st.one_of(st.integers(), st.booleans(), st.none(), st.text(), st.floats(allow_nan=False))), st.lists(st.integers())),\n    default=st.one_of(st.none(), st.integers(), st.text(), st.booleans(), st.floats(allow_nan=False)),\n    key=st.one_of(st.none(), st.just(bool), st.just(lambda x: x is not None), st.just(lambda x: isinstance(x, int) and x % 2 == 0)),\n)\ndef test_value_postcondition(iterable, default, key):\n    result = first(iterable, default=default, key=key)\n    assert result is default or result in iterable\n\n\n@given(\n    iterable=st.one_of(st.lists(st.one_of(st.integers(), st.booleans(), st.none(), st.text(), st.floats(allow_nan=False))), st.lists(st.integers())),\n)\ndef test_value_postcondition_2(iterable):\n    result = first(iterable, default=None)\n    assert result is None or bool(result) is True\n\n\n@given(\n    iterable=st.one_of(st.lists(st.one_of(st.integers(), st.booleans(), st.none(), st.text(), st.floats(allow_nan=False))), st.lists(st.integers())),\n    key=st.one_of(st.just(bool), st.just(lambda x: x is not None), st.just(lambda x: isinstance(x, int) and x % 2 == 0)),\n)\ndef test_value_postcondition_3(iterable, key):\n    result = first(iterable, default=None, key=key)\n    assert result is None or key(result) is True\n\n\n@given(\n    iterable=st.one_of(st.lists(st.one_of(st.integers(), st.booleans(), st.none(), st.text(), st.floats(allow_nan=False))), st.lists(st.integers())),\n)\ndef test_metamorphic(iterable):\n    v = first(iterable, default=None)\n    if v is not None:\n        assert first([v] + list(iterable), default=None) == v\n\n\n@given(\n    iterable=st.one_of(st.lists(st.one_of(st.integers(), st.booleans(), st.none(), st.text(), st.floats(allow_nan=False))), st.lists(st.integers())),\n    default=st.one_of(st.none(), st.integers(), st.text(), st.booleans(), st.floats(allow_nan=False)),\n    key=st.one_of(st.none(), st.just(bool), st.just(lambda x: x is not None), st.just(lambda x: isinstance(x, int) and x % 2 == 0)),\n)\ndef test_totality(iterable, default, key):\n    first(iterable, default=default, key=key)\n",
+          "test_names": [
+            "test_value_postcondition",
+            "test_value_postcondition_2",
+            "test_value_postcondition_3",
+            "test_metamorphic",
+            "test_totality"
+          ],
+          "skipped": []
+        },
+        "bugs_found": [],
+        "fix_suggestion": null,
+        "metadata": {
+          "analysis_duration_ms": 28062,
+          "llm_cost_usd": 0.049464,
+          "tests_generated": 5,
+          "tests_run": 5,
+          "hypothesis_examples_tried": null
+        }
+      },
+      "secs": 31.7
+    },
+    {
+      "lib": "boltons.strutils",
+      "func": "under2camel",
+      "code": "def under2camel(under_string):\n    \"\"\"Converts an underscored string to camelcased. Useful for turning a\n    function name into a class name.\n\n    >>> under2camel('complex_tokenizer')\n    'ComplexTokenizer'\n    \"\"\"\n    return ''.join((w.capitalize() or '_' for w in under_string.split('_')))",
+      "imports": [],
+      "status": 200,
+      "payload": {
+        "analysis_id": "84e23d9c-8930-4b4d-a43f-9e5528ba3de6",
+        "function": {
+          "name": "under2camel",
+          "signature": "(under_string)",
+          "args": [
+            {
+              "name": "under_string",
+              "type_hint": null,
+              "default": null,
+              "kind": "positional_or_keyword"
+            }
+          ],
+          "return_type": null,
+          "docstring": "Converts an underscored string to camelcased. Useful for turning a\nfunction name into a class name.\n\n>>> under2camel('complex_tokenizer')\n'ComplexTokenizer'"
+        },
+        "properties": {
+          "detected": [
+            {
+              "property_class": "type_postcondition",
+              "relation": "isinstance(under2camel(s), str)",
+              "companion_function": null,
+              "rationale": "The function always returns a string (joined characters), matching the expected return type.",
+              "confidence": 0.95
+            },
+            {
+              "property_class": "value_postcondition",
+              "relation": "under2camel(s)[0].isupper() for any non-empty s that doesn't start with '_'",
+              "companion_function": null,
+              "rationale": "By intent, the function produces a CamelCased string, so the first character of the result should be uppercase when the input starts with a word character.",
+              "confidence": 0.85
+            },
+            {
+              "property_class": "metamorphic",
+              "relation": "under2camel(s.lower()) == under2camel(s.upper()) for any underscored string s (case of input letters is irrelevant since capitalize() normalizes each word)",
+              "companion_function": null,
+              "rationale": "capitalize() lowercases all but the first letter of each segment, so the input's case does not affect the output \u2014 making the transformation case-insensitive with respect to the input.",
+              "confidence": 0.82
+            },
+            {
+              "property_class": "invariant_preservation",
+              "relation": "under2camel(s).replace('_', '') has the same alphabetic characters (modulo case) as s.replace('_', '')",
+              "companion_function": null,
+              "rationale": "The transformation only changes casing and removes underscores; no characters are added or dropped (ignoring underscores and case differences).",
+              "confidence": 0.75
+            },
+            {
+              "property_class": "totality",
+              "relation": "under2camel(s) does not raise an exception for any str input s",
+              "companion_function": null,
+              "rationale": "The function uses only str.split and str.capitalize, which are total operations on any string input.",
+              "confidence": 0.7
+            }
+          ],
+          "input_types": {
+            "under_string": null
+          },
+          "return_type": null
+        },
+        "strategy_plan": {
+          "strategies": [
+            {
+              "argument": "under_string",
+              "strategy": "st.text(alphabet=st.sampled_from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_'), min_size=0)",
+              "rationale": "The function accepts any str (totality property confirms no exception for any str input). The docstring and example show underscored identifiers (lowercase letters + underscores), and the metamorphic property confirms case-insensitivity. Restricting to letters and underscores covers the intended domain while still exercising edge cases like leading/trailing underscores and consecutive underscores.",
+              "confidence": 0.82
+            }
+          ],
+          "extra_imports": []
+        },
+        "test_file": {
+          "source": "from hypothesis import given, strategies as st\nimport pytest\n\n\ndef under2camel(under_string):\n    \"\"\"Converts an underscored string to camelcased. Useful for turning a\n    function name into a class name.\n\n    >>> under2camel('complex_tokenizer')\n    'ComplexTokenizer'\n    \"\"\"\n    return ''.join((w.capitalize() or '_' for w in under_string.split('_')))\n\n\n@given(under_string=st.text(alphabet=st.sampled_from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_'), min_size=0))\ndef test_type_postcondition(under_string):\n    assert isinstance(under2camel(under_string), str)\n\n\n@given(under_string=st.text(alphabet=st.sampled_from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_'), min_size=1).filter(lambda s: not s.startswith('_')))\ndef test_value_postcondition(under_string):\n    result = under2camel(under_string)\n    assert result[0].isupper()\n\n\n@given(under_string=st.text(alphabet=st.sampled_from('abcdefghijklmnopqrstuvwxyz_'), min_size=0))\ndef test_metamorphic(under_string):\n    assert under2camel(under_string.lower()) == under2camel(under_string.upper())\n\n\n@given(under_string=st.text(alphabet=st.sampled_from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_'), min_size=0))\ndef test_invariant_preservation(under_string):\n    result = under2camel(under_string)\n    assert result.replace('_', '').lower() == under_string.replace('_', '').lower()\n\n\n@given(under_string=st.text(alphabet=st.sampled_from('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_'), min_size=0))\ndef test_totality(under_string):\n    under2camel(under_string)\n",
+          "test_names": [
+            "test_type_postcondition",
+            "test_value_postcondition",
+            "test_metamorphic",
+            "test_invariant_preservation",
+            "test_totality"
+          ],
+          "skipped": []
+        },
+        "bugs_found": [],
+        "fix_suggestion": null,
+        "metadata": {
+          "analysis_duration_ms": 20811,
+          "llm_cost_usd": 0.03858,
+          "tests_generated": 5,
+          "tests_run": 5,
+          "hypothesis_examples_tried": null
+        }
+      },
+      "secs": 24.4
+    },
+    {
+      "lib": "inflection",
+      "func": "camelize",
+      "code": "def camelize(string: str, uppercase_first_letter: bool=True) -> str:\n    \"\"\"\n    Convert strings to CamelCase.\n\n    Examples::\n\n        >>> camelize(\"device_type\")\n        'DeviceType'\n        >>> camelize(\"device_type\", False)\n        'deviceType'\n\n    :func:`camelize` can be thought of as a inverse of :func:`underscore`,\n    although there are some cases where that does not hold::\n\n        >>> camelize(underscore(\"IOError\"))\n        'IoError'\n\n    :param uppercase_first_letter: if set to `True` :func:`camelize` converts\n        strings to UpperCamelCase. If set to `False` :func:`camelize` produces\n        lowerCamelCase. Defaults to `True`.\n    \"\"\"\n    import re\n    if uppercase_first_letter:\n        return re.sub('(?:^|_)(.)', lambda m: m.group(1).upper(), string)\n    else:\n        return string[0].lower() + camelize(string)[1:]",
+      "imports": [
+        "re"
+      ],
+      "status": 200,
+      "payload": {
+        "analysis_id": "616ac648-cc42-443b-a090-f2e82f773500",
+        "function": {
+          "name": "camelize",
+          "signature": "(string: str, uppercase_first_letter: bool=True) -> str",
+          "args": [
+            {
+              "name": "string",
+              "type_hint": "str",
+              "default": null,
+              "kind": "positional_or_keyword"
+            },
+            {
+              "name": "uppercase_first_letter",
+              "type_hint": "bool",
+              "default": "True",
+              "kind": "positional_or_keyword"
+            }
+          ],
+          "return_type": "str",
+          "docstring": "Convert strings to CamelCase.\n\nExamples::\n\n    >>> camelize(\"device_type\")\n    'DeviceType'\n    >>> camelize(\"device_type\", False)\n    'deviceType'\n\n:func:`camelize` can be thought of as a inverse of :func:`underscore`,\nalthough there are some cases where that does not hold::\n\n    >>> camelize(underscore(\"IOError\"))\n    'IoError'\n\n:param uppercase_first_letter: if set to `True` :func:`camelize` converts\n    strings to UpperCamelCase. If set to `False` :func:`camelize` produces\n    lowerCamelCase. Defaults to `True`."
+        },
+        "properties": {
+          "detected": [
+            {
+              "property_class": "round_trip",
+              "relation": "camelize(underscore(s)) == s for typical snake_case strings (and underscore(camelize(s)) == s for typical CamelCase strings)",
+              "companion_function": "underscore",
+              "rationale": "The docstring explicitly states camelize can be thought of as the inverse of underscore, making them a round-trip pair (with noted exceptions).",
+              "confidence": 0.72
+            },
+            {
+              "property_class": "idempotence",
+              "relation": "camelize(camelize(s, True), True) == camelize(s, True)",
+              "companion_function": null,
+              "rationale": "A string already in CamelCase has no underscores to transform, so applying camelize again should yield the same result.",
+              "confidence": 0.85
+            },
+            {
+              "property_class": "value_postcondition",
+              "relation": "camelize(s, True)[0] == camelize(s, True)[0].upper() for non-empty strings with at least one alphabetic character",
+              "companion_function": null,
+              "rationale": "When uppercase_first_letter=True, the function is documented to produce UpperCamelCase, so the first character must be uppercase.",
+              "confidence": 0.88
+            },
+            {
+              "property_class": "value_postcondition",
+              "relation": "camelize(s, False)[0] == camelize(s, False)[0].lower() for non-empty strings with at least one alphabetic character",
+              "companion_function": null,
+              "rationale": "When uppercase_first_letter=False, the function is documented to produce lowerCamelCase, so the first character must be lowercase.",
+              "confidence": 0.88
+            },
+            {
+              "property_class": "metamorphic",
+              "relation": "camelize(s, False)[0].lower() + camelize(s, False)[1:] == camelize(s, False) and camelize(s, True)[0].upper() + camelize(s, True)[1:] == camelize(s, True)",
+              "companion_function": null,
+              "rationale": "The two modes are related: camelize(s, False) == camelize(s, True)[0].lower() + camelize(s, True)[1:], reflecting the lowerCamelCase vs UpperCamelCase relationship.",
+              "confidence": 0.82
+            },
+            {
+              "property_class": "value_postcondition",
+              "relation": "'_' not in camelize(s, True) for strings where underscores only appear as separators (no leading/trailing underscores)",
+              "companion_function": null,
+              "rationale": "CamelCase conversion removes underscores used as word separators, so the output should contain no underscores for typical snake_case inputs.",
+              "confidence": 0.75
+            },
+            {
+              "property_class": "type_postcondition",
+              "relation": "isinstance(camelize(s, b), str)",
+              "companion_function": null,
+              "rationale": "The function is declared to return str and should always produce a string.",
+              "confidence": 0.99
+            }
+          ],
+          "input_types": {
+            "string": "str",
+            "uppercase_first_letter": "bool"
+          },
+          "return_type": "str"
+        },
+        "strategy_plan": {
+          "strategies": [
+            {
+              "argument": "string",
+              "strategy": "st.one_of(st.text(alphabet=st.characters(whitelist_categories=('Ll', 'Lu', 'Nd'), whitelist_characters='_'), min_size=0), st.from_regex(r'[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*', fullmatch=True), st.from_regex(r'[A-Z][a-z0-9]*([A-Z][a-z0-9]*)*', fullmatch=True))",
+              "rationale": "The function accepts general strings but is primarily designed for snake_case and CamelCase inputs. We cover: (1) broad strings with letters, digits, and underscores to test general behaviour; (2) typical snake_case strings (the primary domain implied by the docstring and round-trip property); (3) typical CamelCase strings (for the inverse round-trip). This avoids over-constraining while still exercising the intended domain.",
+              "confidence": 0.82
+            },
+            {
+              "argument": "uppercase_first_letter",
+              "strategy": "st.booleans()",
+              "rationale": "The parameter is a plain bool with two meaningful values (True for UpperCamelCase, False for lowerCamelCase); st.booleans() covers both.",
+              "confidence": 0.99
+            }
+          ],
+          "extra_imports": []
+        },
+        "test_file": {
+          "source": "from hypothesis import given, strategies as st\nimport pytest\nfrom inflection import underscore\n\n\ndef camelize(string: str, uppercase_first_letter: bool=True) -> str:\n    \"\"\"\n    Convert strings to CamelCase.\n\n    Examples::\n\n        >>> camelize(\"device_type\")\n        'DeviceType'\n        >>> camelize(\"device_type\", False)\n        'deviceType'\n\n    :func:`camelize` can be thought of as a inverse of :func:`underscore`,\n    although there are some cases where that does not hold::\n\n        >>> camelize(underscore(\"IOError\"))\n        'IoError'\n\n    :param uppercase_first_letter: if set to `True` :func:`camelize` converts\n        strings to UpperCamelCase. If set to `False` :func:`camelize` produces\n        lowerCamelCase. Defaults to `True`.\n    \"\"\"\n    import re\n    if uppercase_first_letter:\n        return re.sub('(?:^|_)(.)', lambda m: m.group(1).upper(), string)\n    else:\n        return string[0].lower() + camelize(string)[1:]\n\n\n@given(string=st.from_regex(r'[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*', fullmatch=True))\ndef test_round_trip_snake_to_camel(string):\n    # camelize(underscore(s)) == s for typical CamelCase strings\n    # Here we test underscore then camelize round-trip on snake_case input\n    assert camelize(underscore(camelize(string)), True) == camelize(string, True)\n\n\n@given(string=st.from_regex(r'[A-Z][a-z0-9]*([A-Z][a-z0-9]*)*', fullmatch=True))\ndef test_round_trip_camel_to_snake(string):\n    # underscore(camelize(s)) == s for typical CamelCase strings\n    assert underscore(camelize(underscore(string))) == underscore(string)\n\n\n@given(string=st.one_of(\n    st.text(alphabet=st.characters(whitelist_categories=('Ll', 'Lu', 'Nd'), whitelist_characters='_'), min_size=0),\n    st.from_regex(r'[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*', fullmatch=True),\n    st.from_regex(r'[A-Z][a-z0-9]*([A-Z][a-z0-9]*)*', fullmatch=True)\n))\ndef test_idempotence(string):\n    assert camelize(camelize(string, True), True) == camelize(string, True)\n\n\n@given(string=st.one_of(\n    st.text(alphabet=st.characters(whitelist_categories=('Ll', 'Lu', 'Nd'), whitelist_characters='_'), min_size=1),\n    st.from_regex(r'[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*', fullmatch=True),\n    st.from_regex(r'[A-Z][a-z0-9]*([A-Z][a-z0-9]*)*', fullmatch=True)\n))\ndef test_value_postcondition_uppercase_first(string):\n    result = camelize(string, True)\n    # Only check if result is non-empty and first char is alphabetic\n    if result and result[0].isalpha():\n        assert result[0] == result[0].upper()\n\n\n@given(string=st.from_regex(r'[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*', fullmatch=True))\ndef test_value_postcondition_no_underscores(string):\n    # '_' not in camelize(s, True) for strings where underscores only appear as separators\n    result = camelize(string, True)\n    assert '_' not in result\n",
+          "test_names": [
+            "test_round_trip_snake_to_camel",
+            "test_round_trip_camel_to_snake",
+            "test_idempotence",
+            "test_value_postcondition_uppercase_first",
+            "test_value_postcondition_no_underscores"
+          ],
+          "skipped": [
+            "test_value_postcondition_lowercase_first: dropped \u2014 references undefined name(s): assume",
+            "test_metamorphic_case_consistency: dropped \u2014 references undefined name(s): assume",
+            "test_type_postcondition: dropped \u2014 references undefined name(s): assume"
+          ]
+        },
+        "bugs_found": [],
+        "fix_suggestion": null,
+        "metadata": {
+          "analysis_duration_ms": 34763,
+          "llm_cost_usd": 0.063624,
+          "tests_generated": 5,
+          "tests_run": 0,
+          "hypothesis_examples_tried": null
+        }
+      },
+      "secs": 38.4
+    },
+    {
+      "lib": "inflection",
+      "func": "dasherize",
+      "code": "def dasherize(word: str) -> str:\n    \"\"\"Replace underscores with dashes in the string.\n\n    Example::\n\n        >>> dasherize(\"puni_puni\")\n        'puni-puni'\n\n    \"\"\"\n    return word.replace('_', '-')",
+      "imports": [],
+      "status": 200,
+      "payload": {
+        "analysis_id": "8dc58a34-6964-46e7-98ef-aa7e31547568",
+        "function": {
+          "name": "dasherize",
+          "signature": "(word: str) -> str",
+          "args": [
+            {
+              "name": "word",
+              "type_hint": "str",
+              "default": null,
+              "kind": "positional_or_keyword"
+            }
+          ],
+          "return_type": "str",
+          "docstring": "Replace underscores with dashes in the string.\n\nExample::\n\n    >>> dasherize(\"puni_puni\")\n    'puni-puni'"
+        },
+        "properties": {
+          "detected": [
+            {
+              "property_class": "idempotence",
+              "relation": "dasherize(dasherize(s)) == dasherize(s)",
+              "companion_function": null,
+              "rationale": "Once all underscores are replaced with dashes, a second call finds no underscores to replace, so the output is unchanged.",
+              "confidence": 0.97
+            },
+            {
+              "property_class": "invariant_preservation",
+              "relation": "len(dasherize(s)) == len(s)",
+              "companion_function": null,
+              "rationale": "A character-for-character replacement ('_' \u2192 '-') never changes the length of the string.",
+              "confidence": 0.99
+            },
+            {
+              "property_class": "metamorphic",
+              "relation": "'_' not in dasherize(s)",
+              "companion_function": null,
+              "rationale": "After dasherizing, no underscores should remain in the output \u2014 all have been replaced by dashes.",
+              "confidence": 0.97
+            },
+            {
+              "property_class": "type_postcondition",
+              "relation": "isinstance(dasherize(s), str)",
+              "companion_function": null,
+              "rationale": "str.replace always returns a str, matching the declared return type.",
+              "confidence": 0.99
+            }
+          ],
+          "input_types": {
+            "word": "str"
+          },
+          "return_type": "str"
+        },
+        "strategy_plan": {
+          "strategies": [
+            {
+              "argument": "word",
+              "strategy": "st.text()",
+              "rationale": "Any string is a valid input \u2014 the function simply replaces underscores with dashes, so no domain restriction is needed. Broad text generation will exercise strings with underscores, dashes, mixed content, empty strings, and Unicode, maximising bug-finding potential.",
+              "confidence": 0.95
+            }
+          ],
+          "extra_imports": []
+        },
+        "test_file": {
+          "source": "from hypothesis import given, strategies as st\nimport pytest\n\n\ndef dasherize(word: str) -> str:\n    \"\"\"Replace underscores with dashes in the string.\n\n    Example::\n\n        >>> dasherize(\"puni_puni\")\n        'puni-puni'\n\n    \"\"\"\n    return word.replace('_', '-')\n\n\n@given(word=st.text())\ndef test_idempotence(word):\n    assert dasherize(dasherize(word)) == dasherize(word)\n\n\n@given(word=st.text())\ndef test_invariant_preservation(word):\n    assert len(dasherize(word)) == len(word)\n\n\n@given(word=st.text())\ndef test_metamorphic(word):\n    assert '_' not in dasherize(word)\n\n\n@given(word=st.text())\ndef test_type_postcondition(word):\n    assert isinstance(dasherize(word), str)\n",
+          "test_names": [
+            "test_idempotence",
+            "test_invariant_preservation",
+            "test_metamorphic",
+            "test_type_postcondition"
+          ],
+          "skipped": []
+        },
+        "bugs_found": [],
+        "fix_suggestion": null,
+        "metadata": {
+          "analysis_duration_ms": 14208,
+          "llm_cost_usd": 0.028362,
+          "tests_generated": 4,
+          "tests_run": 4,
+          "hypothesis_examples_tried": null
+        }
+      },
+      "secs": 14.3
+    },
+    {
+      "lib": "inflection",
+      "func": "ordinal",
+      "code": "def ordinal(number: int) -> str:\n    \"\"\"\n    Return the suffix that should be added to a number to denote the position\n    in an ordered sequence such as 1st, 2nd, 3rd, 4th.\n\n    Examples::\n\n        >>> ordinal(1)\n        'st'\n        >>> ordinal(2)\n        'nd'\n        >>> ordinal(1002)\n        'nd'\n        >>> ordinal(1003)\n        'rd'\n        >>> ordinal(-11)\n        'th'\n        >>> ordinal(-1021)\n        'st'\n\n    \"\"\"\n    number = abs(int(number))\n    if number % 100 in (11, 12, 13):\n        return 'th'\n    else:\n        return {1: 'st', 2: 'nd', 3: 'rd'}.get(number % 10, 'th')",
+      "imports": [],
+      "status": 200,
+      "payload": {
+        "analysis_id": "ac81686d-88c3-4147-bab4-f23989594953",
+        "function": {
+          "name": "ordinal",
+          "signature": "(number: int) -> str",
+          "args": [
+            {
+              "name": "number",
+              "type_hint": "int",
+              "default": null,
+              "kind": "positional_or_keyword"
+            }
+          ],
+          "return_type": "str",
+          "docstring": "Return the suffix that should be added to a number to denote the position\nin an ordered sequence such as 1st, 2nd, 3rd, 4th.\n\nExamples::\n\n    >>> ordinal(1)\n    'st'\n    >>> ordinal(2)\n    'nd'\n    >>> ordinal(1002)\n    'nd'\n    >>> ordinal(1003)\n    'rd'\n    >>> ordinal(-11)\n    'th'\n    >>> ordinal(-1021)\n    'st'"
+        },
+        "properties": {
+          "detected": [
+            {
+              "property_class": "type_postcondition",
+              "relation": "isinstance(ordinal(n), str)",
+              "companion_function": null,
+              "rationale": "The declared return type is str; the function always returns one of 'st', 'nd', 'rd', 'th'.",
+              "confidence": 0.99
+            },
+            {
+              "property_class": "value_postcondition",
+              "relation": "ordinal(n) in ('st', 'nd', 'rd', 'th')",
+              "companion_function": null,
+              "rationale": "By definition an ordinal suffix is one of exactly four English suffixes; this is derivable purely from the docstring examples and intent, not the body.",
+              "confidence": 0.97
+            },
+            {
+              "property_class": "metamorphic",
+              "relation": "ordinal(n) == ordinal(-n) for all integer n",
+              "companion_function": null,
+              "rationale": "The docstring examples show negative numbers are handled by taking the absolute value, so the sign of the input does not affect the suffix.",
+              "confidence": 0.95
+            },
+            {
+              "property_class": "metamorphic",
+              "relation": "ordinal(n) == ordinal(n + 100) for all integer n (periodicity mod 100 after accounting for the 11/12/13 special case)",
+              "companion_function": null,
+              "rationale": "The suffix depends only on n % 100 and n % 10, so adding any multiple of 100 preserves the result.",
+              "confidence": 0.85
+            },
+            {
+              "property_class": "totality",
+              "relation": "ordinal(n) does not raise for any int n",
+              "companion_function": null,
+              "rationale": "The function accepts any int (including negatives and zero) and always returns a string without raising; totality is a baseline guarantee worth asserting.",
+              "confidence": 0.9
+            }
+          ],
+          "input_types": {
+            "number": "int"
+          },
+          "return_type": "str"
+        },
+        "strategy_plan": {
+          "strategies": [
+            {
+              "argument": "number",
+              "strategy": "st.integers()",
+              "rationale": "The docstring examples include positive, negative, and large integers, and the totality property confirms ordinal(n) does not raise for any int n \u2014 so the full integer domain is valid.",
+              "confidence": 0.98
+            }
+          ],
+          "extra_imports": []
+        },
+        "test_file": {
+          "source": "from hypothesis import given, strategies as st\nimport pytest\n\n\ndef ordinal(number: int) -> str:\n    \"\"\"\n    Return the suffix that should be added to a number to denote the position\n    in an ordered sequence such as 1st, 2nd, 3rd, 4th.\n\n    Examples::\n\n        >>> ordinal(1)\n        'st'\n        >>> ordinal(2)\n        'nd'\n        >>> ordinal(1002)\n        'nd'\n        >>> ordinal(1003)\n        'rd'\n        >>> ordinal(-11)\n        'th'\n        >>> ordinal(-1021)\n        'st'\n\n    \"\"\"\n    number = abs(int(number))\n    if number % 100 in (11, 12, 13):\n        return 'th'\n    else:\n        return {1: 'st', 2: 'nd', 3: 'rd'}.get(number % 10, 'th')\n\n\n@given(number=st.integers())\ndef test_type_postcondition(number):\n    assert isinstance(ordinal(number), str)\n\n\n@given(number=st.integers())\ndef test_value_postcondition(number):\n    assert ordinal(number) in ('st', 'nd', 'rd', 'th')\n\n\n@given(number=st.integers())\ndef test_metamorphic_negation(number):\n    assert ordinal(number) == ordinal(-number)\n\n\n@given(number=st.integers())\ndef test_metamorphic_periodicity(number):\n    assert ordinal(number) == ordinal(number + 100)\n\n\n@given(number=st.integers())\ndef test_totality(number):\n    ordinal(number)\n",
+          "test_names": [
+            "test_type_postcondition",
+            "test_value_postcondition",
+            "test_metamorphic_negation",
+            "test_metamorphic_periodicity",
+            "test_totality"
+          ],
+          "skipped": []
+        },
+        "bugs_found": [],
+        "fix_suggestion": null,
+        "metadata": {
+          "analysis_duration_ms": 15072,
+          "llm_cost_usd": 0.032706,
+          "tests_generated": 5,
+          "tests_run": 5,
+          "hypothesis_examples_tried": null
+        }
+      },
+      "secs": 15.1
+    },
+    {
+      "lib": "inflection",
+      "func": "transliterate",
+      "code": "def transliterate(string: str) -> str:\n    \"\"\"\n    Replace non-ASCII characters with an ASCII approximation. If no\n    approximation exists, the non-ASCII character is ignored. The string must\n    be ``unicode``.\n\n    Examples::\n\n        >>> transliterate('\u00e4l\u00e4m\u00f6l\u00f6')\n        'alamolo'\n        >>> transliterate('\u00c6r\u00f8sk\u00f8bing')\n        'rskbing'\n\n    \"\"\"\n    import unicodedata\n    normalized = unicodedata.normalize('NFKD', string)\n    return normalized.encode('ascii', 'ignore').decode('ascii')",
+      "imports": [
+        "unicodedata"
+      ],
+      "status": 200,
+      "payload": {
+        "analysis_id": "89f6e616-7156-4396-8b60-7883d6bc8550",
+        "function": {
+          "name": "transliterate",
+          "signature": "(string: str) -> str",
+          "args": [
+            {
+              "name": "string",
+              "type_hint": "str",
+              "default": null,
+              "kind": "positional_or_keyword"
+            }
+          ],
+          "return_type": "str",
+          "docstring": "Replace non-ASCII characters with an ASCII approximation. If no\napproximation exists, the non-ASCII character is ignored. The string must\nbe ``unicode``.\n\nExamples::\n\n    >>> transliterate('\u00e4l\u00e4m\u00f6l\u00f6')\n    'alamolo'\n    >>> transliterate('\u00c6r\u00f8sk\u00f8bing')\n    'rskbing'"
+        },
+        "properties": {
+          "detected": [
+            {
+              "property_class": "idempotence",
+              "relation": "transliterate(transliterate(s)) == transliterate(s)",
+              "companion_function": null,
+              "rationale": "Once a string is fully ASCII, a second pass through NFKD normalization and ASCII encoding/decoding leaves it unchanged \u2014 applying it twice yields the same result as once.",
+              "confidence": 0.95
+            },
+            {
+              "property_class": "value_postcondition",
+              "relation": "transliterate(s).isascii() == True",
+              "companion_function": null,
+              "rationale": "The function's explicit intent is to produce an ASCII string by replacing or dropping non-ASCII characters, so the output must always be pure ASCII.",
+              "confidence": 0.97
+            },
+            {
+              "property_class": "invariant_preservation",
+              "relation": "len(transliterate(s)) <= len(s)",
+              "companion_function": null,
+              "rationale": "Characters are either approximated (mapped to one or more ASCII chars, but NFKD decomposition can only expand, then the encode/ignore step drops non-ASCII bytes) or dropped entirely, so the output length is never greater than the input length.",
+              "confidence": 0.75
+            },
+            {
+              "property_class": "type_postcondition",
+              "relation": "isinstance(transliterate(s), str)",
+              "companion_function": null,
+              "rationale": "The declared return type is str and the body always returns a decoded str.",
+              "confidence": 0.99
+            },
+            {
+              "property_class": "metamorphic",
+              "relation": "transliterate(s1 + s2) == transliterate(s1) + transliterate(s2)",
+              "companion_function": null,
+              "rationale": "Transliteration is character-local (each character is handled independently), so concatenating inputs before or after transliteration should yield the same result.",
+              "confidence": 0.82
+            }
+          ],
+          "input_types": {
+            "string": "str"
+          },
+          "return_type": "str"
+        },
+        "strategy_plan": {
+          "strategies": [
+            {
+              "argument": "string",
+              "strategy": "st.text()",
+              "rationale": "The function accepts any unicode string and handles all characters (replacing or dropping non-ASCII ones). No narrowing is needed \u2014 broad text() coverage exercises both ASCII and non-ASCII inputs, which is exactly what the docstring and detected properties (idempotence, postcondition, metamorphic) are designed to test.",
+              "confidence": 0.95
+            }
+          ],
+          "extra_imports": []
+        },
+        "test_file": {
+          "source": "from hypothesis import given, strategies as st\nimport pytest\n\n\ndef transliterate(string: str) -> str:\n    \"\"\"\n    Replace non-ASCII characters with an ASCII approximation. If no\n    approximation exists, the non-ASCII character is ignored. The string must\n    be ``unicode``.\n\n    Examples::\n\n        >>> transliterate('\u00e4l\u00e4m\u00f6l\u00f6')\n        'alamolo'\n        >>> transliterate('\u00c6r\u00f8sk\u00f8bing')\n        'rskbing'\n\n    \"\"\"\n    import unicodedata\n    normalized = unicodedata.normalize('NFKD', string)\n    return normalized.encode('ascii', 'ignore').decode('ascii')\n\n\n@given(string=st.text())\ndef test_idempotence(string):\n    assert transliterate(transliterate(string)) == transliterate(string)\n\n\n@given(string=st.text())\ndef test_value_postcondition(string):\n    assert transliterate(string).isascii() == True\n\n\n@given(string=st.text())\ndef test_invariant_preservation(string):\n    assert len(transliterate(string)) <= len(string)\n\n\n@given(string=st.text())\ndef test_type_postcondition(string):\n    assert isinstance(transliterate(string), str)\n\n\n@given(string=st.text(), string2=st.text())\ndef test_metamorphic(string, string2):\n    assert transliterate(string + string2) == transliterate(string) + transliterate(string2)\n",
+          "test_names": [
+            "test_idempotence",
+            "test_value_postcondition",
+            "test_invariant_preservation",
+            "test_type_postcondition",
+            "test_metamorphic"
+          ],
+          "skipped": []
+        },
+        "bugs_found": [],
+        "fix_suggestion": null,
+        "metadata": {
+          "analysis_duration_ms": 16925,
+          "llm_cost_usd": 0.032709,
+          "tests_generated": 5,
+          "tests_run": 5,
+          "hypothesis_examples_tried": null
+        }
+      },
+      "secs": 17.0
+    },
+    {
+      "lib": "inflection",
+      "func": "underscore",
+      "code": "def underscore(word: str) -> str:\n    \"\"\"\n    Make an underscored, lowercase form from the expression in the string.\n\n    Example::\n\n        >>> underscore(\"DeviceType\")\n        'device_type'\n\n    As a rule of thumb you can think of :func:`underscore` as the inverse of\n    :func:`camelize`, though there are cases where that does not hold::\n\n        >>> camelize(underscore(\"IOError\"))\n        'IoError'\n\n    \"\"\"\n    import re\n    word = re.sub('([A-Z]+)([A-Z][a-z])', '\\\\1_\\\\2', word)\n    word = re.sub('([a-z\\\\d])([A-Z])', '\\\\1_\\\\2', word)\n    word = word.replace('-', '_')\n    return word.lower()",
+      "imports": [
+        "re"
+      ],
+      "status": 200,
+      "payload": {
+        "analysis_id": "cab74ebb-242c-4601-9463-0797e39a6b05",
+        "function": {
+          "name": "underscore",
+          "signature": "(word: str) -> str",
+          "args": [
+            {
+              "name": "word",
+              "type_hint": "str",
+              "default": null,
+              "kind": "positional_or_keyword"
+            }
+          ],
+          "return_type": "str",
+          "docstring": "Make an underscored, lowercase form from the expression in the string.\n\nExample::\n\n    >>> underscore(\"DeviceType\")\n    'device_type'\n\nAs a rule of thumb you can think of :func:`underscore` as the inverse of\n:func:`camelize`, though there are cases where that does not hold::\n\n    >>> camelize(underscore(\"IOError\"))\n    'IoError'"
+        },
+        "properties": {
+          "detected": [
+            {
+              "property_class": "round_trip",
+              "relation": "underscore(camelize(s)) == s for simple camelCase/PascalCase strings",
+              "companion_function": "camelize",
+              "rationale": "The docstring explicitly describes underscore as the inverse of camelize (with caveats for edge cases like IOError), making it a partial round-trip pair.",
+              "confidence": 0.65
+            },
+            {
+              "property_class": "idempotence",
+              "relation": "underscore(underscore(s)) == underscore(s)",
+              "companion_function": null,
+              "rationale": "Applying underscore to an already underscored, lowercase string should produce no further changes \u2014 it is already in the target normal form.",
+              "confidence": 0.92
+            },
+            {
+              "property_class": "value_postcondition",
+              "relation": "underscore(s).lower() == underscore(s)",
+              "companion_function": null,
+              "rationale": "The docstring states the result is a lowercase form, so the output must be entirely lowercase.",
+              "confidence": 0.97
+            },
+            {
+              "property_class": "value_postcondition",
+              "relation": "'-' not in underscore(s)",
+              "companion_function": null,
+              "rationale": "The body explicitly replaces hyphens with underscores, and the docstring says the result is an underscored form \u2014 hyphens must not appear in the output.",
+              "confidence": 0.9
+            },
+            {
+              "property_class": "metamorphic",
+              "relation": "underscore(s.lower()) == underscore(s) when s contains no uppercase runs (i.e., already lowercase input is unchanged by underscore)",
+              "companion_function": null,
+              "rationale": "For inputs that are already lowercase with no camel-case transitions, changing case should not affect the output.",
+              "confidence": 0.6
+            },
+            {
+              "property_class": "type_postcondition",
+              "relation": "isinstance(underscore(s), str)",
+              "companion_function": null,
+              "rationale": "The return type is declared as str and the function always returns a string.",
+              "confidence": 0.99
+            }
+          ],
+          "input_types": {
+            "word": "str"
+          },
+          "return_type": "str"
+        },
+        "strategy_plan": {
+          "strategies": [
+            {
+              "argument": "word",
+              "strategy": "st.from_regex(r'[A-Za-z][A-Za-z0-9]*(?:[_\\-/ ][A-Za-z][A-Za-z0-9]*)*', fullmatch=True)",
+              "rationale": "The underscore function is designed to convert CamelCase/PascalCase or already-underscored identifiers to snake_case. Valid inputs are identifier-like strings: letters, digits, underscores, hyphens, and spaces as separators. This regex generates realistic inputs (words with optional separators) that cover the intended domain without triggering edge cases from arbitrary unicode or control characters. It also supports the round-trip property with camelize for simple camelCase/PascalCase strings.",
+              "confidence": 0.8
+            }
+          ],
+          "extra_imports": []
+        },
+        "test_file": {
+          "source": "from hypothesis import given, strategies as st\nimport pytest\nfrom inflection import camelize\n\n\ndef underscore(word: str) -> str:\n    \"\"\"\n    Make an underscored, lowercase form from the expression in the string.\n\n    Example::\n\n        >>> underscore(\"DeviceType\")\n        'device_type'\n\n    As a rule of thumb you can think of :func:`underscore` as the inverse of\n    :func:`camelize`, though there are cases where that does not hold::\n\n        >>> camelize(underscore(\"IOError\"))\n        'IoError'\n\n    \"\"\"\n    import re\n    word = re.sub('([A-Z]+)([A-Z][a-z])', '\\\\1_\\\\2', word)\n    word = re.sub('([a-z\\\\d])([A-Z])', '\\\\1_\\\\2', word)\n    word = word.replace('-', '_')\n    return word.lower()\n\n\n@given(word=st.from_regex(r'[A-Za-z][A-Za-z0-9]*(?:[_\\-/ ][A-Za-z][A-Za-z0-9]*)*', fullmatch=True))\ndef test_idempotence(word):\n    assert underscore(underscore(word)) == underscore(word)\n\n\n@given(word=st.from_regex(r'[A-Za-z][A-Za-z0-9]*(?:[_\\-/ ][A-Za-z][A-Za-z0-9]*)*', fullmatch=True))\ndef test_value_postcondition_lowercase(word):\n    result = underscore(word)\n    assert result.lower() == result\n\n\n@given(word=st.from_regex(r'[A-Za-z][A-Za-z0-9]*(?:[_\\-/ ][A-Za-z][A-Za-z0-9]*)*', fullmatch=True))\ndef test_value_postcondition_no_dash(word):\n    assert '-' not in underscore(word)\n\n\n@given(word=st.from_regex(r'[a-z][a-z0-9]*(?:[_][a-z][a-z0-9]*)*', fullmatch=True))\ndef test_metamorphic_lowercase_unchanged(word):\n    # For already-lowercase snake_case input, lowercasing first makes no difference\n    assert underscore(word.lower()) == underscore(word)\n\n\n@given(word=st.from_regex(r'[A-Za-z][A-Za-z0-9]*(?:[_\\-/ ][A-Za-z][A-Za-z0-9]*)*', fullmatch=True))\ndef test_type_postcondition(word):\n    assert isinstance(underscore(word), str)\n\n\n@given(word=st.from_regex(r'[a-z][a-z0-9]*(?:_[a-z][a-z0-9]*)*', fullmatch=True))\ndef test_round_trip(word):\n    # underscore(camelize(s)) == s holds for simple snake_case strings\n    assert underscore(camelize(word)) == word\n",
+          "test_names": [
+            "test_idempotence",
+            "test_value_postcondition_lowercase",
+            "test_value_postcondition_no_dash",
+            "test_metamorphic_lowercase_unchanged",
+            "test_type_postcondition",
+            "test_round_trip"
+          ],
+          "skipped": [
+            "round_trip: camelize is an external companion; only holds for simple snake_case inputs produced by underscore, so test is scoped to underscore-output strings"
+          ]
+        },
+        "bugs_found": [],
+        "fix_suggestion": null,
+        "metadata": {
+          "analysis_duration_ms": 22933,
+          "llm_cost_usd": 0.041739,
+          "tests_generated": 6,
+          "tests_run": 0,
+          "hypothesis_examples_tried": null
+        }
+      },
+      "secs": 26.6
+    }
+  ],
+  "skipped": [
+    {
+      "lib": "inflection",
+      "func": "titleize",
+      "reason": "needs humanize, underscore"
+    },
+    {
+      "lib": "inflection",
+      "func": "ordinalize",
+      "reason": "needs ordinal"
+    },
+    {
+      "lib": "inflection",
+      "func": "pluralize",
+      "reason": "needs PLURALS, UNCOUNTABLES"
+    },
+    {
+      "lib": "inflection",
+      "func": "singularize",
+      "reason": "needs SINGULARS, UNCOUNTABLES"
+    },
+    {
+      "lib": "inflection",
+      "func": "parameterize",
+      "reason": "needs transliterate"
+    },
+    {
+      "lib": "inflection",
+      "func": "tableize",
+      "reason": "needs pluralize, underscore"
+    },
+    {
+      "lib": "boltons.strutils",
+      "func": "slugify",
+      "reason": "needs asciify, split_punct_ws"
+    },
+    {
+      "lib": "boltons.strutils",
+      "func": "camel2under",
+      "reason": "needs _camel2under_re"
+    },
+    {
+      "lib": "boltons.strutils",
+      "func": "ordinalize",
+      "reason": "needs _ORDINAL_MAP"
+    },
+    {
+      "lib": "boltons.strutils",
+      "func": "cardinalize",
+      "reason": "needs pluralize"
+    },
+    {
+      "lib": "boltons.strutils",
+      "func": "bytes2human",
+      "reason": "needs _SIZE_RANGES"
+    },
+    {
+      "lib": "boltons.strutils",
+      "func": "strip_ansi",
+      "reason": "needs ANSI_SEQUENCES"
+    },
+    {
+      "lib": "boltons.mathutils",
+      "func": "ceil",
+      "reason": "needs _ceil"
+    },
+    {
+      "lib": "boltons.mathutils",
+      "func": "floor",
+      "reason": "needs _floor"
+    },
+    {
+      "lib": "humanize",
+      "func": "ordinal",
+      "reason": "needs P_, _format_not_finite"
+    },
+    {
+      "lib": "humanize",
+      "func": "intcomma",
+      "reason": "needs _format_not_finite, decimal_separator, thousands_separator"
+    },
+    {
+      "lib": "humanize",
+      "func": "apnumber",
+      "reason": "needs _, _format_not_finite"
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+<unknown>:13: SyntaxWarning: invalid escape sequence '\W'
+discovered=146 runnable=49 running=49 (cap 80) skipped=97
+  [200] b.funcutils.dir_dict  bugs=0  20.8s
+  [200] b.formatutils.construct_format_field_str  bugs=0  26.6s
+  [200] b.funcutils.copy_function  bugs=5  28.5s
+  [200] b.funcutils.format_invocation  bugs=0  35.7s
+  [200] b.dictutils.subdict  bugs=1  39.5s
+  [200] b.funcutils.format_nonexp_repr  bugs=0  37.4s
+  [200] b.funcutils.get_module_callables  bugs=0  33.0s
+  [200] b.funcutils.mro_items  bugs=0  24.2s
+  [200] b.funcutils.inspect_formatargspec  bugs=0  44.8s
+  [200] b.funcutils.partial_ordering  bugs=0  39.5s
+  [200] b.iterutils.flatten_iter  bugs=5  34.5s
+  [200] b.iterutils.backoff_iter  bugs=0  40.4s
+  [200] b.iterutils.is_iterable  bugs=0  26.9s
+  [200] b.iterutils.lstrip_iter  bugs=0  23.5s
+  [200] b.iterutils.frange  bugs=0  54.6s
+  [200] b.iterutils.rstrip_iter  bugs=0  27.1s
+  [200] b.mathutils.ceil  bugs=0  26.2s
+  [200] b.mathutils.clamp  bugs=0  26.0s
+  [200] b.mathutils.floor  bugs=0  34.3s
+  [200] b.strutils.a10n  bugs=0  24.8s
+  [200] b.statsutils.format_histogram_counts  bugs=1  34.0s
+  [200] b.strutils.args2cmd  bugs=0  28.5s
+  [200] b.iterutils.xfrange  bugs=0  62.5s
+  [200] b.strutils.gunzip_bytes  bugs=0  15.8s
+  [200] b.strutils.format_int_list  bugs=0  24.5s
+  [200] b.strutils.is_ascii  bugs=0  24.6s
+  [200] b.strutils.gzip_bytes  bugs=0  30.9s
+  [200] b.strutils.human_readable_list  bugs=0  30.7s
+  [200] b.strutils.is_uuid  bugs=0  30.1s
+  [200] b.strutils.parse_int_list  bugs=0  27.5s
+  [200] b.strutils.removeprefix  bugs=0  21.1s
+  [200] b.strutils.unwrap_text  bugs=1  28.7s
+  [200] b.strutils.under2camel  bugs=1  35.6s
+  [200] b.tableutils.to_text  bugs=1  24.8s
+  [200] b.timeutils.strpdate  bugs=2  35.2s
+  [200] b.typeutils.get_all_subclasses  bugs=7  26.1s
+  [200] b.urlutils.resolve_path_parts  bugs=0  28.2s
+  [200] b.timeutils.daterange  bugs=1  50.7s
+  [200] b.typeutils.issubclass  bugs=0  30.9s
+  [200] inflection.dasherize  bugs=0  17.6s
+  [200] inflection.ordinal  bugs=1  17.7s
+  [200] inflection.camelize  bugs=0  27.7s
+  [200] inflection.transliterate  bugs=0  17.7s
+  [200] inflection.humanize  bugs=0  22.1s
+  [200] stringcase.lowercase  bugs=1  17.9s
+  [200] stringcase.uppercase  bugs=1  18.6s
+  [200] stringcase.alphanumcase  bugs=1  21.8s
+  [200] stringcase.trimcase  bugs=0  20.8s
+  [200] inflection.underscore  bugs=1  34.1s
+
+DONE: 49 run, 15 flagged, ~$2.2848. Report: <workdir>/sweep2_report.md

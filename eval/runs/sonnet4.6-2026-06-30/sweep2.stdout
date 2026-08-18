@@ -1,0 +1,42 @@
+<unknown>:13: SyntaxWarning: invalid escape sequence '\W'
+discovered=146 runnable=38 running=38 (cap 80) skipped=108
+  [200] b.funcutils.dir_dict  bugs=0  24.7s
+  [200] b.formatutils.construct_format_field_str  bugs=1  24.9s
+  [200] b.funcutils.format_nonexp_repr  bugs=0  39.5s
+  [200] b.funcutils.format_invocation  bugs=0  39.8s
+  [200] b.dictutils.subdict  bugs=0  41.2s
+  [200] b.funcutils.mro_items  bugs=0  23.5s
+  [200] b.funcutils.inspect_formatargspec  bugs=0  38.6s
+  [200] b.funcutils.partial_ordering  bugs=0  37.2s
+  [200] b.iterutils.backoff_iter  bugs=0  37.4s
+  [200] b.iterutils.frange  bugs=3  36.8s
+  [200] b.iterutils.is_iterable  bugs=0  35.0s
+  [200] b.iterutils.lstrip_iter  bugs=0  26.3s
+  [200] b.mathutils.clamp  bugs=0  22.7s
+  [200] b.iterutils.rstrip_iter  bugs=0  30.8s
+  [200] b.strutils.a10n  bugs=1  20.7s
+  [200] b.statsutils.format_histogram_counts  bugs=1  30.8s
+  [200] b.iterutils.xfrange  bugs=0  43.6s
+  [200] b.strutils.is_ascii  bugs=0  17.9s
+  [200] b.strutils.args2cmd  bugs=1  32.1s
+  [200] b.strutils.format_int_list  bugs=0  25.7s
+  [200] b.strutils.human_readable_list  bugs=0  23.5s
+  [200] b.strutils.parse_int_list  bugs=0  27.8s
+  [200] b.strutils.removeprefix  bugs=1  24.4s
+  [200] b.tableutils.to_text  bugs=1  24.8s
+  [429] inflection.camelize  bugs=-  0.0s
+  [429] inflection.dasherize  bugs=-  0.0s
+  [429] inflection.humanize  bugs=-  0.0s
+  [429] inflection.ordinal  bugs=-  0.0s
+  [429] inflection.transliterate  bugs=-  0.0s
+  [429] inflection.underscore  bugs=-  0.0s
+  [429] stringcase.alphanumcase  bugs=-  0.0s
+  [429] stringcase.lowercase  bugs=-  0.0s
+  [429] stringcase.trimcase  bugs=-  0.0s
+  [429] stringcase.uppercase  bugs=-  0.0s
+  [200] b.strutils.under2camel  bugs=1  26.5s
+  [200] b.strutils.unwrap_text  bugs=2  27.7s
+  [200] b.timeutils.strpdate  bugs=5  32.9s
+  [200] b.urlutils.resolve_path_parts  bugs=0  25.6s
+
+DONE: 38 run, 10 flagged, ~$1.3416. Report: <workdir>/sweep2_report.md

@@ -1,0 +1,49 @@
+{"lib": "b.funcutils", "func": "dir_dict", "status": 200, "secs": 22.8, "imports": []}
+{"lib": "b.formatutils", "func": "construct_format_field_str", "status": 200, "secs": 29.0, "imports": []}
+{"lib": "b.dictutils", "func": "subdict", "status": 200, "secs": 37.7, "imports": []}
+{"lib": "b.funcutils", "func": "get_module_callables", "status": 200, "secs": 26.3, "imports": ["sys"]}
+{"lib": "b.funcutils", "func": "format_nonexp_repr", "status": 200, "secs": 38.9, "imports": []}
+{"lib": "b.funcutils", "func": "copy_function", "status": 200, "secs": 66.0, "imports": ["FunctionType"]}
+{"lib": "b.funcutils", "func": "format_invocation", "status": 200, "secs": 68.5, "imports": []}
+{"lib": "b.funcutils", "func": "mro_items", "status": 200, "secs": 18.9, "imports": ["itertools"]}
+{"lib": "b.funcutils", "func": "inspect_formatargspec", "status": 200, "secs": 54.2, "imports": []}
+{"lib": "b.funcutils", "func": "partial_ordering", "status": 200, "secs": 40.2, "imports": []}
+{"lib": "b.iterutils", "func": "backoff_iter", "status": 200, "secs": 41.4, "imports": ["math", "random"]}
+{"lib": "b.iterutils", "func": "flatten_iter", "status": 200, "secs": 43.8, "imports": ["Iterable"]}
+{"lib": "b.iterutils", "func": "is_iterable", "status": 200, "secs": 22.2, "imports": []}
+{"lib": "b.iterutils", "func": "frange", "status": 200, "secs": 41.0, "imports": ["math"]}
+{"lib": "b.iterutils", "func": "lstrip_iter", "status": 200, "secs": 22.8, "imports": []}
+{"lib": "b.iterutils", "func": "rstrip_iter", "status": 200, "secs": 26.9, "imports": []}
+{"lib": "b.mathutils", "func": "clamp", "status": 200, "secs": 24.7, "imports": []}
+{"lib": "b.mathutils", "func": "ceil", "status": 200, "secs": 32.3, "imports": ["_ceil", "bisect"]}
+{"lib": "b.mathutils", "func": "floor", "status": 200, "secs": 30.5, "imports": ["_floor", "bisect"]}
+{"lib": "b.strutils", "func": "a10n", "status": 200, "secs": 24.6, "imports": []}
+{"lib": "b.statsutils", "func": "format_histogram_counts", "status": 200, "secs": 38.9, "imports": []}
+{"lib": "b.strutils", "func": "args2cmd", "status": 200, "secs": 28.3, "imports": []}
+{"lib": "b.iterutils", "func": "xfrange", "status": 504, "secs": 63.3, "imports": []}
+{"lib": "b.strutils", "func": "gunzip_bytes", "status": 200, "secs": 15.9, "imports": ["zlib"]}
+{"lib": "b.strutils", "func": "format_int_list", "status": 200, "secs": 29.2, "imports": ["collections"]}
+{"lib": "b.strutils", "func": "is_ascii", "status": 200, "secs": 23.6, "imports": []}
+{"lib": "b.strutils", "func": "is_uuid", "status": 200, "secs": 27.3, "imports": ["uuid"]}
+{"lib": "b.strutils", "func": "gzip_bytes", "status": 200, "secs": 36.4, "imports": ["GzipFile", "StringIO"]}
+{"lib": "b.strutils", "func": "human_readable_list", "status": 200, "secs": 35.2, "imports": []}
+{"lib": "b.strutils", "func": "parse_int_list", "status": 200, "secs": 28.4, "imports": []}
+{"lib": "b.strutils", "func": "removeprefix", "status": 200, "secs": 18.7, "imports": []}
+{"lib": "b.tableutils", "func": "to_text", "status": 200, "secs": 30.2, "imports": []}
+{"lib": "b.strutils", "func": "unwrap_text", "status": 200, "secs": 31.5, "imports": []}
+{"lib": "b.strutils", "func": "under2camel", "status": 200, "secs": 41.6, "imports": []}
+{"lib": "b.typeutils", "func": "get_all_subclasses", "status": 200, "secs": 22.3, "imports": ["deque"]}
+{"lib": "b.typeutils", "func": "issubclass", "status": 200, "secs": 27.2, "imports": ["_issubclass"]}
+{"lib": "b.urlutils", "func": "resolve_path_parts", "status": 200, "secs": 24.3, "imports": []}
+{"lib": "inflection", "func": "dasherize", "status": 200, "secs": 13.8, "imports": []}
+{"lib": "inflection", "func": "camelize", "status": 200, "secs": 25.7, "imports": ["re"]}
+{"lib": "b.timeutils", "func": "strpdate", "status": 200, "secs": 71.8, "imports": ["datetime"]}
+{"lib": "inflection", "func": "humanize", "status": 200, "secs": 25.1, "imports": ["re"]}
+{"lib": "b.timeutils", "func": "daterange", "status": 504, "secs": 95.4, "imports": ["date", "operator", "timedelta"]}
+{"lib": "inflection", "func": "transliterate", "status": 200, "secs": 21.5, "imports": ["unicodedata"]}
+{"lib": "inflection", "func": "ordinal", "status": 200, "secs": 27.5, "imports": []}
+{"lib": "inflection", "func": "underscore", "status": 200, "secs": 30.5, "imports": ["re"]}
+{"lib": "stringcase", "func": "trimcase", "status": 200, "secs": 13.5, "imports": []}
+{"lib": "stringcase", "func": "alphanumcase", "status": 200, "secs": 24.8, "imports": ["re"]}
+{"lib": "stringcase", "func": "lowercase", "status": 200, "secs": 18.9, "imports": []}
+{"lib": "stringcase", "func": "uppercase", "status": 200, "secs": 18.5, "imports": []}

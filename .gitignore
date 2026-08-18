@@ -25,10 +25,10 @@ dist/
 .idea/
 .vscode/
 
-# Claude Code (local tooling — never commit)
+# Local agent tooling — never commit
 .claude/
 
-# Internal planning doc (mentions Claude; contains private strategy notes) — keep local only
+# Internal planning doc (private strategy notes) — keep local only
 TypeWright_Project_Brief.pdf
 
 # GitHub App private key — never commit
@@ -38,3 +38,6 @@ TypeWright_Project_Brief.pdf
 runs.db
 runs.db-wal
 runs.db-shm
+
+# Eval harness: target libraries are installed locally (see eval/harness/README.md)
+eval/harness/libs/

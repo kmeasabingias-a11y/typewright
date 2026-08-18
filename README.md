@@ -16,11 +16,17 @@ It ships in two form factors: a **GitHub App** that comments on pull requests, a
 LLM-driven property-based testing technique in *Agentic Property-Based Testing*
 (arXiv:2510.09907), not novel research — see [Acknowledgment](#acknowledgment).
 
-> **Status:** Phases 1–9 complete (parsing, property detection, strategy + test
-> generation, sandbox execution, fix suggestions, GitHub App, web demo, observability /
-> cost controls / hardening). **Phase 10 — polish & launch — is in progress.** 170 tests.
-> The maintained spec is [`PROJECT_BRIEF.md`](PROJECT_BRIEF.md); design decisions and
-> their rationale are in [`DECISIONS.md`](DECISIONS.md).
+> **Status:** All 10 phases complete — parsing, property detection, strategy + test
+> generation, sandbox execution, fix suggestions, GitHub App, web demo, observability,
+> cost controls, hardening, and launch polish. **198 tests.** Deployed and verified
+> end-to-end via `docker-compose.demo.yml`. The maintained spec is
+> [`PROJECT_BRIEF.md`](PROJECT_BRIEF.md); design decisions and their rationale are in
+> [`DECISIONS.md`](DECISIONS.md).
+
+> ### How reliable is it? **13–20% precision** — about one flagged candidate in six is a
+> real bug. That number is measured, not estimated: see the
+> **[precision evaluation](eval/)** — 49 real library functions, every flagged candidate
+> hand-verified, false positives and negative results published alongside the wins.
 
 ## How it works
 
@@ -149,6 +155,17 @@ uv run pytest    # run the test suite (170 tests)
 
 Plain-language, per-module walkthroughs live in the sibling
 `TypeWright_Code_Walkthrough/` folder.
+
+## Repository map
+
+| path | what's there |
+|---|---|
+| [`src/typewright/`](src/typewright/) | the service — parse → detect → generate → execute → report |
+| [`tests/`](tests/) | the test suite (198 tests) |
+| [**`eval/`**](eval/) | **the precision evaluation** — the measured answer to "how often is this right?", plus the harness and every raw run artifact |
+| [`docs/walkthroughs/`](docs/walkthroughs/) | a plain-language walkthrough of every source file, written for someone who doesn't know the codebase — start at [`INDEX.md`](docs/walkthroughs/INDEX.md) |
+| [`DECISIONS.md`](DECISIONS.md) | every design decision and why it was made |
+| [`DEPLOY.md`](DEPLOY.md) | deployment runbook |
 
 ## Acknowledgment
 
